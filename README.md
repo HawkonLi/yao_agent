@@ -26,31 +26,31 @@ DEEPSEEK_API_KEY=sk-...
 
 ```mermaid
 graph TB
-    subgraph "SessionGroup（多智能体编排）"
-        S1[LanguageModelSession]
-        S2[LanguageModelSession]
-        S1 ~~~ S2
-    end
-    subgraph "LanguageModelSession（一个智能体）"
-        DP[DynamicProfile ─── 按 state 激活一个子 Profile]
-        P[Profile ─── 绑定指令 + 模型参数 + 生命周期钩子]
-        DI[DynamicInstructions ─── yield 声明指令 / 工具 / 嵌套组合]
-        DP --> P --> DI
-    end
-    subgraph "跨会话"
-        ENV[Environment ─── 按类型注入的共享对象]
-        ENV -.-> S1
-        ENV -.-> S2
-    end
-    subgraph "可组合单元"
-        I[Instructions ─── 一段模型可见文本]
-        T[Tool ─── 模型可调用的能力，签名自动生成 schema]
-    end
-    DI -.-> I
-    DI -.-> T
+    APP[App ─── 部署 / 集成外壳 可选]
+    SG[SessionGroup ─── 多智能体编排 串行 / 并行 / 循环]
+    S1[LanguageModelSession ─── 一个智能体]
+    S2[LanguageModelSession ─── 另一个智能体]
+    DP[DynamicProfile ─── 按 state 激活子 Profile]
+    P[Profile ─── 指令 + 模型参数 + 生命周期钩子]
+    DI[DynamicInstructions ─── yield 声明指令 / 工具]
+    I[Instructions ─── 模型可见文本]
+    T[Tool ─── 可调用能力 schema 自动生成]
+    ENV[Environment ─── 跨会话共享对象 按类型注入]
+
+    APP --> SG
+    SG --> S1
+    SG --> S2
+    S1 --> DP
+    S2 --> DP
+    DP --> P
+    P --> DI
+    DI --> I
+    DI --> T
+    ENV -.-> S1
+    ENV -.-> S2
 ```
 
-三层声明式结构：**DynamicProfile**（按状态激活一个 Profile）→ **Profile**（绑定参数与钩子）→ **DynamicInstructions**（`yield` 声明指令与工具）。
+自顶向下：**App**（可选部署外壳）→ **SessionGroup**（多智能体编排）→ **LanguageModelSession**（智能体）→ **DynamicProfile**（选 Profile）→ **Profile**（参数/钩子）→ **DynamicInstructions**（`yield` 声明指令与工具）。`Environment` 横向跨会话共享。
 
 ## 快速上手
 

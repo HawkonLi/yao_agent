@@ -1,12 +1,15 @@
 # YaoAgent
 
-> 声明你的智能体结构和编排，简化在科研或其他轻量场景下智能体框架带来的额外负担，让智能体编排像声明界面一样清晰和简单
+> 像声明 SwiftUI 界面一样声明智能体——用 Python
 
-YaoAgent提供了Instruction、Profile、会话管理和编排工具以及日志和追踪工具，用于声明式定义单智能体和多智能体任务。框架使用生命周期管理能够
-在编排时关注请求、智能体、工具等各个模块，使用 `EnvironmentObject`进行跨会话数据流管理，使用修饰符允许快速配置各种参数信息。借助成熟的声明式
-UI的范式，让你能够只聚焦在智能体的编排中。**如果你对声明式UI不熟悉，可以从这里开始**：[教学指南 docs/GUIDE.md](docs/GUIDE.md)
+YaoAgent 是一个声明式、响应式的 Python 智能体框架，灵感来自 Apple Foundation Models 的
+[Dynamic Sessions API](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles)。
 
-Inspired By Apple [Foundation Models(iOS 27+)](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles) and [SwiftUI](https://developer.apple.com/documentation/SwiftUI)
+把智能体的每一层都变成可组合的 DSL 节点：配置用 `Profile`，指令用 `yield`，
+多智能体用 `SessionGroup`。修饰符链式传参，生命周期钩子 8 种覆盖全流程，
+`EnvironmentObject` 按类型注入实现跨会话共享。框架替你跑编排，你只声明结构与数据流。
+
+**对声明式不熟？从这里开始**：[教学指南 docs/GUIDE.md](docs/GUIDE.md)
 
 ## 安装
 
@@ -48,7 +51,7 @@ graph TD
     ENV -.-> Sess2
 ```
 
-自顶向下：**App**（可选部署外壳）→ **SessionGroup**（多智能体编排）→ **LanguageModelSession**（智能体）→ **DynamicProfile**（选 Profile）→ **Profile**（参数/钩子）→ **DynamicInstructions**（`yield` 声明指令与工具）。`Environment` 横向跨会话共享。
+自顶向下：**App**（可选部署外壳）→ **SessionGroup**（多智能体编排）→ **LanguageModelSession**（智能体）→ **DynamicProfile**（智能体配置 Profile）→ **Profile**（静态特征）→ **DynamicInstructions**（`yield` 声明指令与工具）。`Environment` 横向跨会话共享。
 
 ## 快速上手
 
@@ -152,26 +155,26 @@ asyncio.run(app_run())
 
 > 上面 6 步展示了 YaoAgent 的完整 DSL：
 >
-> - **`yield` = 声明式组合**：指令、工具、嵌套指令用生成器编排，每次请求前重新求值
+> - **`yield`** **= 声明式组合**：指令、工具、嵌套指令用生成器编排，每次请求前重新求值
 > - **修饰符链式传递**：`.temperature(0.7).model("deepseek-v4-flash")`
 > - **生命周期钩子 8 种**：`on_prompt` / `on_response` / `on_response_stream` / `on_reasoning_stream` / `on_tool_call` / `on_tool_output` / `on_activate` / `on_deactivate`
-> - **`Environment` 按类型注入**：声明 `Environment(Blackboard)`，框架自动注入，不进模型 schema
-> - **`SessionGroup` 拓扑编排**：三元组 `group_style` + `input_style` + `output_style`，成员递归嵌套
-> - **`App` 统一交付**：同一个 `body()` 出 `run()`（批量 JSON 信封）和 `stream()`（实时事件流）
+> - **`Environment`** **按类型注入**：声明 `Environment(Blackboard)`，框架自动注入，不进模型 schema
+> - **`SessionGroup`** **拓扑编排**：三元组 `group_style` + `input_style` + `output_style`，成员递归嵌套
+> - **`App`** **统一交付**：同一个 `body()` 出 `run()`（批量 JSON 信封）和 `stream()`（实时事件流）
 
 ## 核心概念
 
-| 类型                                    | 作用                                                                                                       |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `Instructions`                        | 一段模型可见的指令文本。                                                                                   |
-| `Tool`                                | 可被模型调用的能力；`call` 的类型注解自动生成参数 schema，支持同步/异步。                                |
-| `DynamicInstructions`                 | `body()` 是生成器，用 `yield` 声明指令、工具、嵌套指令；每次请求前重新求值。                           |
-| `Profile`                             | 绑定一组动态指令 + 模型参数（model/temperature/reasoning）+ 生命周期钩子，不可变。                         |
-| `DynamicProfile`                      | `body()` 按状态选出一个 `Profile`；外层修饰符穿透到内层。       |
-| `LanguageModelSession`                | 一个智能体：持有 Profile、状态、环境、历史；`respond()` / `stream_response()`。 |
-| `EnvironmentObject` / `Environment` | 跨智能体共享的对象，按类型注入与取用（≈ SwiftUI `@EnvironmentObject`）。                                |
-| `SessionGroup`                        | 多智能体拓扑编排（串/并/循环），可嵌套可 `run`。                                      |
-| `App`                                 | 部署外壳（可选）：同一个 `body()` 出 `run()` 批量信封 + `stream()` 实时事件流。 |
+| 类型                                  | 作用                                                           |
+| ----------------------------------- | ------------------------------------------------------------ |
+| `Instructions`                      | 一段模型可见的指令文本。                                                 |
+| `Tool`                              | 可被模型调用的能力；`call` 的类型注解自动生成参数 schema，支持同步/异步。                 |
+| `DynamicInstructions`               | `body()` 是生成器，用 `yield` 声明指令、工具、嵌套指令；每次请求前重新求值。              |
+| `Profile`                           | 绑定一组动态指令 + 模型参数（model/temperature/reasoning）+ 生命周期钩子，不可变。    |
+| `DynamicProfile`                    | `body()` 按状态选出一个 `Profile`；外层修饰符穿透到内层。                       |
+| `LanguageModelSession`              | 一个智能体：持有 Profile、状态、环境、历史；`respond()` / `stream_response()`。 |
+| `EnvironmentObject` / `Environment` | 跨智能体共享的对象，按类型注入与取用（≈ SwiftUI `@EnvironmentObject`）。          |
+| `SessionGroup`                      | 多智能体拓扑编排（串/并/循环），可嵌套可 `run`。                                 |
+| `App`                               | 部署外壳（可选）：同一个 `body()` 出 `run()` 批量信封 + `stream()` 实时事件流。     |
 
 三层结构：`DynamicProfile`（选哪个） → `Profile`（参数/钩子） → `DynamicInstructions`（指令/工具）。
 
@@ -223,16 +226,16 @@ Profile(instructions=MyInstructions()).modifier(Debug())
 
 链式声明，可同步或异步；钩子可闭包捕获 `session` 以读写会话状态。
 
-| 钩子                        | 触发时机                                                |
-| --------------------------- | ------------------------------------------------------- |
-| `on_prompt(fn)`           | 发起请求前（入参 prompt）                               |
-| `on_response(fn)`         | 得到最终回复后（入参 text；可在此压缩历史）             |
-| `on_response_stream(fn)`  | 流式答案增量（仅 stream_response）                      |
-| `on_reasoning_stream(fn)` | 流式思考增量（仅 stream_response，DeepSeek 推理模型）   |
-| `on_tool_call(fn)`        | 执行工具前（入参 `ToolCall`；**抛异常即拒绝**） |
-| `on_tool_output(fn)`      | 工具产出后（入参 `ToolCall, output`）                 |
+| 钩子                        | 触发时机                                     |
+| ------------------------- | ---------------------------------------- |
+| `on_prompt(fn)`           | 发起请求前（入参 prompt）                         |
+| `on_response(fn)`         | 得到最终回复后（入参 text；可在此压缩历史）                 |
+| `on_response_stream(fn)`  | 流式答案增量（仅 stream\_response）               |
+| `on_reasoning_stream(fn)` | 流式思考增量（仅 stream\_response，DeepSeek 推理模型） |
+| `on_tool_call(fn)`        | 执行工具前（入参 `ToolCall`；**抛异常即拒绝**）          |
+| `on_tool_output(fn)`      | 工具产出后（入参 `ToolCall, output`）             |
 | `on_activate(fn)`         | 配置成为激活态时（适合初始化）                          |
-| `on_deactivate(fn)`       | 配置被切换走时（适合清理）                              |
+| `on_deactivate(fn)`       | 配置被切换走时（适合清理）                            |
 
 `on_activate`/`on_deactivate` 由顶层 `DynamicProfile` 切换激活子配置时自动触发。
 
@@ -258,9 +261,8 @@ session = LanguageModelSession(MyProfile(), llm_config=cfg, prefs={})
 
 两层状态，边界清楚：
 
-- **私有 `state`（≈ `@State`）**：会话自己拥有、跨请求持久。推荐传入**显式类型化对象**（dataclass），
+- **私有** **`state`（≈** **`@State`）**：会话自己拥有、跨请求持久。推荐传入**显式类型化对象**（dataclass），
   比无类型口袋安全：
-
   ```python
   @dataclass
   class KitchenState:
@@ -271,8 +273,7 @@ session = LanguageModelSession(MyProfile(), llm_config=cfg, prefs={})
   # body / 工具里 session.state.stage —— 类型已知、IDE/mypy 可查
   # （不传 state 时，关键字参数仍会汇成一个 SimpleNamespace，方便快速脚本）
   ```
-- **共享 `environment`（≈ `@EnvironmentObject`）**：跨智能体共享的对象，**按类型**注入与取用：
-
+- **共享** **`environment`（≈** **`@EnvironmentObject`）**：跨智能体共享的对象，**按类型**注入与取用：
   ```python
   class Notebook(EnvironmentObject):
       def __init__(self): self.findings = []
@@ -285,7 +286,6 @@ session = LanguageModelSession(MyProfile(), llm_config=cfg, prefs={})
 
   session.environment(Notebook())                    # 链式注入，可多个（一个类型一个实例）
   ```
-
   并发下保持「单一写者 + 同步读快照」即安全；需要跨 `await` 的多步更新就在你的环境对象里放一把
   `asyncio.Lock`。
 
@@ -308,9 +308,9 @@ answer = await pipeline.run("研究主题")
 
 group 由三个**正交维度**描述（编排约束另外两个的合法取值）：
 
-- **编排 `group_style`**（成员怎么跑）：`Style.sequential` / `Style.parallel` / `Style.loop(until=, max_iters=)`。
-- **输入 `input_style`**（成员收什么）：`InputStyle.pipe`（上一个输出喂下一个）/ `InputStyle.broadcast`（都拿原输入，靠共享 `environment` 通信）。
-- **输出 `output_style`**（谁的输出暴露给 group）：`OutputStyle.last` / `OutputStyle.pick(member)` / `OutputStyle.merge(fn)`。
+- **编排** **`group_style`**（成员怎么跑）：`Style.sequential` / `Style.parallel` / `Style.loop(until=, max_iters=)`。
+- **输入** **`input_style`**（成员收什么）：`InputStyle.pipe`（上一个输出喂下一个）/ `InputStyle.broadcast`（都拿原输入，靠共享 `environment` 通信）。
+- **输出** **`output_style`**（谁的输出暴露给 group）：`OutputStyle.last` / `OutputStyle.pick(member)` / `OutputStyle.merge(fn)`。
 
 （`input_style` / `output_style` 命名描述的是**智能体之间的内部接线**，与面向用户的运行时输出层
 `Runtime`（见下文）刻意区分。）每种编排自带默认输入/输出（如 sequential = pipe + last，
@@ -383,11 +383,11 @@ session = LanguageModelSession(
 （`tool_call` / `response` / `response_stream` …），每个把事件打成 dict 丢给同一个 `sink`（目的地）。
 `Runtime` 是装三个 Handler 的盒子，按受众分三个投递口：
 
-| 投递口     | 给谁             | 典型去处                 |
-| ---------- | ---------------- | ------------------------ |
-| `log`    | 开发者 / 留档    | Trace → jsonl / console |
-| `stream` | 最终用户（实时） | SSE / websocket / 终端   |
-| `output` | 上游系统         | 结构化 JSON              |
+| 投递口      | 给谁       | 典型去处                    |
+| -------- | -------- | ----------------------- |
+| `log`    | 开发者 / 留档 | Trace → jsonl / console |
+| `stream` | 最终用户（实时） | SSE / websocket / 终端    |
+| `output` | 上游系统     | 结构化 JSON                |
 
 `Runtime` **永远有默认值**（模块级默认 + `ContextVar`），`session.runtime` 任何时候都拿得到非空对象。
 在 `body` 里取投递口、把想要的事件接上去即可（不想要就不接，零分支）：
@@ -409,7 +409,7 @@ class MyProfile(DynamicProfile):
 `Session` / `SessionGroup` 是"View"（可组合的智能体逻辑）；`App` 是把它们接到外部世界
 （FastAPI、推荐系统、命令行）的最外层外壳——**可选**，框架内直接 `respond()` 即可。
 
-参见上方快速上手第 6 步的完整示例，以及 [example_app.py](example_app.py)。
+参见上方快速上手第 6 步的完整示例，以及 [example\_app.py](example_app.py)。
 
 ## 输入（Prompt）
 

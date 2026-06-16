@@ -1,0 +1,74 @@
+site_name: YaoAgent
+site_description: 声明式 Python 智能体框架 —— 灵感来自 Apple Foundation Models
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: 暗色模式
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: 亮色模式
+
+plugins:
+  - search:
+      lang: zh
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            show_source: true
+            show_root_heading: true
+            show_root_toc_entry: false
+            show_category_heading: true
+            heading_level: 2
+            docstring_style: null
+            members_order: source
+            group_by_category: true
+            show_signature_annotations: true
+            separate_signature: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.details
+  - admonition
+  - toc:
+      permalink: "#"
+
+nav:
+  - 首页: index.md
+  - 教学指南: GUIDE.md
+  - API 参考:
+      - 概览: api/index.md
+      - Session（会话）: api/session.md
+      - Profile（配置）: api/profile.md
+      - Instructions（指令）: api/instructions.md
+      - Tool（工具）: api/tool.md
+      - Group（编排）: api/group.md
+      - App（应用外壳）: api/app.md
+      - LLM 配置: api/llm_config.md
+      - 错误系统: api/errors.md
+      - 环境 & 依赖注入: api/environment.md
+      - 日志追踪: api/trace.md
+      - 运行时: api/runtime.md
+  - 示例:
+      - 功能展示: example.md
+      - 厨房助手: kitchen_demo.md
+      - 多智能体编排: group_demo.md
+      - App 接入层: app_demo.md

@@ -28,7 +28,7 @@ classifiers = [
 dev = ["pytest>=7"]
 
 [project.urls]
-Documentation = "https://github.com/HawkonLi/yaoagent/blob/main/docs/GUIDE.md"
+Documentation = "https://github.com/HawkonLi/yao_agent/blob/main/docs/GUIDE.md"
 
 [tool.setuptools]
 packages = ["yaoagent"]

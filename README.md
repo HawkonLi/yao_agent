@@ -6,10 +6,10 @@
 
 YaoAgent 取名于此：**好的智能体不是写出来的，是组合出来的。**
 
-声明式组合、响应式求值、生命周期管理、环境注入、工具自愈——把智能体编排抽象成
-一层层可拼装的零件，组合变则行为变。框架替你跑完剩下的。
+它是一个组合式编排框架。你声明零件怎么拼——指令、工具、钩子、环境——框架
+负责生命周期管理、跨会话数据注入、工具自愈和日志追踪。拼法不同，行为就不同。
 
-Inspired by Apple [Foundation Models](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles) dynamic sessions API.
+Inspired by Apple [Foundation Models](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles) dynamic sessions API and [SwiftUI](https://developer.apple.com/documentation/SwiftUI).
 
 ## 安装
 

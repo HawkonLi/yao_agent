@@ -25,17 +25,17 @@ DEEPSEEK_API_KEY=sk-...
 ## 概念速览
 
 ```mermaid
-graph TB
-    APP[App ─── 部署 / 集成外壳 可选]
-    SG[SessionGroup ─── 多智能体编排 串行 / 并行 / 循环]
-    S1[LanguageModelSession ─── 一个智能体]
-    S2[LanguageModelSession ─── 另一个智能体]
-    DP[DynamicProfile ─── 按 state 激活子 Profile]
-    P[Profile ─── 指令 + 模型参数 + 生命周期钩子]
-    DI[DynamicInstructions ─── yield 声明指令 / 工具]
-    I[Instructions ─── 模型可见文本]
-    T[Tool ─── 可调用能力 schema 自动生成]
-    ENV[Environment ─── 跨会话共享对象 按类型注入]
+graph TD
+    APP["App - 部署/集成外壳（可选）"]
+    SG["SessionGroup - 多智能体编排"]
+    S1["LanguageModelSession - 智能体"]
+    S2["LanguageModelSession - 智能体"]
+    DP["DynamicProfile - 按 state 激活子 Profile"]
+    P["Profile - 指令 + 参数 + 钩子"]
+    DI["DynamicInstructions - yield 声明指令/工具"]
+    I["Instructions - 模型可见文本"]
+    T["Tool - 可调用能力，schema 自动生成"]
+    ENV["Environment - 跨会话共享对象（按类型注入）"]
 
     APP --> SG
     SG --> S1
@@ -59,7 +59,7 @@ import asyncio
 from typing import Annotated
 from yaoagent import *
 
-# ── 第 1 层：工具（签名自动生成 JSON schema）──
+# ═══════════════════════ 1. 工具层 ═══════════════════════
 class SearchWeb(Tool):
     name: str = "search_web"
     description: str = "搜索互联网。"
@@ -68,61 +68,97 @@ class SearchWeb(Tool):
 
 class Summarize(Tool):
     name: str = "summarize"
-    description: str = "用本地知识总结一段文本。"
+    description: str = "总结文本。"
     def call(self, text: Annotated[str, "待总结文本"]) -> str:
         return f"摘要：{text[:100]}..."
 
-# ── 第 2 层：指令（yield = 声明式组合，每次请求前重新求值）──
+# ═══════════════════════ 2. 指令层 ═══════════════════════
 class ResearchInstructions(DynamicInstructions):
     def body(self, session) -> DynamicInstructionStream:
         yield Instructions("你是研究员。先搜索，再总结。用中文回答。")
         yield SearchWeb()
         yield Summarize()
 
-# ── 第 3 层：Profile（绑定指令 + 模型参数 + 钩子）──
+# ═══════════════════════ 3. Profile 层 ═══════════════════════
 class ResearchProfile(DynamicProfile):
     def body(self, session) -> Profile:
         return (Profile(instructions=ResearchInstructions())
-                .temperature(0.7)                           # 链式修饰符
-                .model("deepseek-v4-flash")                 # 值类：内层优先
-                .on_tool_call(lambda c: print(f"工具调用: {c.name}")))  # 钩子类：跨层累加
+                .temperature(0.7)                              # 链式修饰符：值类内层优先
+                .model("deepseek-v4-flash")
+                .on_prompt(lambda p: print(f"请求: {p}"))      # 生命周期钩子：on_prompt
+                .on_tool_call(lambda c: print(f"工具: {c.name}"))  # on_tool_call
+                .on_response(lambda r: print(f"回复: {r}"))    # on_response
 
-# ── 运行：一行 respond() ——
-async def main():
-    session = LanguageModelSession(
-        ResearchProfile(),
-        llm_config=LLMConfig.deepseek(),
+# ═══════════════════════ 4. 运行 ═══════════════════════
+async def single_agent():
+    session = LanguageModelSession(ResearchProfile(), llm_config=LLMConfig.deepseek())
+    answer = await session.respond("今天 AI 新闻？")
+    # answer 是 Response（str 子类）→ 可直接打印
+    print(answer, answer.usage)
+
+# ═══════════════════════ 5. SessionGroup 多智能体 ═══════════════════════
+# 共享黑板：按类型注入，跨智能体穿透
+class Blackboard(EnvironmentObject):
+    findings: list[str] = []
+
+class SaveToBoard(Tool):
+    name: str = "save"
+    description: str = "记到共享黑板。"
+    board = Environment(Blackboard)  # 声明依赖，不进模型 schema
+    def call(self, note: str) -> str:
+        self.board.findings.append(note); return "已记录"
+
+class BoardInstructions(DynamicInstructions):
+    def body(self, session) -> DynamicInstructionStream:
+        yield Instructions("先搜索再记到黑板。")
+        yield SearchWeb()
+        yield SaveToBoard()
+
+class BoardProfile(DynamicProfile):
+    def body(self, session) -> Profile:
+        return Profile(instructions=BoardInstructions()).temperature(0.5)
+
+async def multi_agent():
+    group = (
+        SessionGroup(
+            LanguageModelSession(BoardProfile()),          # 研究员 → 写黑板
+            LanguageModelSession(ResearchProfile()),       # 写作者 → 读黑板
+        )
+        .group_style(Style.sequential)                    # 串行：一个跑完再跑下一个
+        .input_style(InputStyle.broadcast)                 # 各拿原输入，靠黑板通信
+        .environment(Blackboard())                         # 黑板穿透所有成员
+        .llm_config(LLMConfig.deepseek())
     )
-    answer = await session.respond("今天有什么 AI 新闻？")
-    print(answer)       # Response（str 子类），可直接打印
-    print(answer.usage)  # Usage(prompt_tokens=114, completion_tokens=87, total_tokens=201)
+    print(await group.run("AI 最新进展"))
 
-asyncio.run(main())
+# ═══════════════════════ 6. App 部署外壳 ═══════════════════════
+class ResearchApp(App):
+    """同一个 body()，两种交付面：run() 批处理 / stream() 实时流。"""
+    def body(self) -> SessionGroup:
+        return (SessionGroup(
+            LanguageModelSession(BoardProfile()),
+            LanguageModelSession(ResearchProfile()),
+        ).group_style(Style.sequential).environment(Blackboard()).llm_config(LLMConfig.deepseek()))
+
+    def on_stream(self, event): print(event)  # 覆写：实时事件往哪送
+
+async def app_run():
+    env = await ResearchApp().run("AI 趋势")     # 批量：返回 JSON 信封
+    print(env["output"], env["usage"])
+
+    async for event in ResearchApp().stream("AI 趋势"):  # 实时：事件流
+        render(event)
+
+asyncio.run(app_run())
 ```
 
-**核心要点**：
-- **三层声明**：`DynamicProfile`（选 Profile）→ `Profile`（绑参数/钩子）→ `DynamicInstructions`（`yield` 编排指令/工具）
-- **`yield` = 声明**——类 SwiftUI 的 `@resultBuilder`，但这是纯 Python 生成器
-- **修饰符链式传递**：`.temperature(0.7).model(...).on_tool_call(...)`
-- **工具签名即 schema**：`Annotated[str, "搜索关键词"]` → 自动生成 JSON schema，无需手写
-
-更进一步——把上面的 Profile 放进多智能体编排：
-
-```python
-class Notebook(EnvironmentObject):
-    notes: list[str] = []
-
-pipeline = (
-    SessionGroup(
-        LanguageModelSession(ResearchProfile()),          # 研究员
-        LanguageModelSession(WritingProfile()),           # 写作助手（读黑板上的笔记）
-    )
-    .group_style(Style.sequential)                       # 串行：一个跑完再跑下一个
-    .environment(Notebook())                              # 共享黑板——穿透所有成员
-    .llm_config(LLMConfig.deepseek())
-)
-answer = await pipeline.run("AI 最新进展")
-```
+> 上面 6 步展示了 YaoAgent 的完整 DSL：
+> - **`yield` = 声明式组合**：指令、工具、嵌套指令用生成器编排，每次请求前重新求值
+> - **修饰符链式传递**：`.temperature(0.7).model("deepseek-v4-flash")`
+> - **生命周期钩子 8 种**：`on_prompt` / `on_response` / `on_response_stream` / `on_reasoning_stream` / `on_tool_call` / `on_tool_output` / `on_activate` / `on_deactivate`
+> - **`Environment` 按类型注入**：声明 `Environment(Blackboard)`，框架自动注入，不进模型 schema
+> - **`SessionGroup` 拓扑编排**：三元组 `group_style` + `input_style` + `output_style`，成员递归嵌套
+> - **`App` 统一交付**：同一个 `body()` 出 `run()`（批量 JSON 信封）和 `stream()`（实时事件流）
 
 ## 核心概念
 
@@ -191,6 +227,8 @@ Profile(instructions=MyInstructions()).modifier(Debug())
 |---|---|
 | `on_prompt(fn)` | 发起请求前（入参 prompt） |
 | `on_response(fn)` | 得到最终回复后（入参 text；可在此压缩历史） |
+| `on_response_stream(fn)` | 流式答案增量（仅 stream_response） |
+| `on_reasoning_stream(fn)` | 流式思考增量（仅 stream_response，DeepSeek 推理模型） |
 | `on_tool_call(fn)` | 执行工具前（入参 `ToolCall`；**抛异常即拒绝**） |
 | `on_tool_output(fn)` | 工具产出后（入参 `ToolCall, output`） |
 | `on_activate(fn)` | 配置成为激活态时（适合初始化） |

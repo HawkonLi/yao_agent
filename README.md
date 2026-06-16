@@ -11,8 +11,10 @@ YaoAgent 的名字就取自这个哲学：**好的智能体不是写出来的，
 组合改变，行为就跟着改变。框架替你跑编排、管状态、处理错误、记录日志。
 你只决定哪些零件怎么拼。
 
-就像六爻叠加成卦，YaoAgent 用 `yield` 声明指令、`Profile` 绑定参数、`SessionGroup` 编排多智能体。
-层层组合，层层声明。
+就像六爻成卦——爻位有初、二、三、四、五、上，YaoAgent 也有自己的一整套"爻"：
+`yield` 拼指令，`Profile` 定参数，`SessionGroup` 编排多智能体，
+生命周期的 8 种钩子观测每一刻，`Environment` 横向注入让零件之间天然共享上下文。
+组合式框架：换几个爻，就是另一个卦。
 
 Inspired by Apple [Foundation Models](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles) dynamic sessions API.
 

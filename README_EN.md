@@ -15,6 +15,8 @@ State and parameter details are tucked away. Change the composition, change the 
 
 Inspired by Apple [Foundation Models](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles) dynamic sessions API and [SwiftUI](https://developer.apple.com/documentation/SwiftUI).
 
+[Full Documentation →](https://hawkonli.github.io/yao_agent/)
+
 ## Installation
 
 ```bash
@@ -29,31 +31,7 @@ DEEPSEEK_API_KEY=sk-...
 
 ## Architecture
 
-```mermaid
-graph TD
-    APP["App — deployment/integration shell (optional)"]
-    SG["SessionGroup — multi-agent orchestration"]
-    Sess1["LanguageModelSession — an agent"]
-    Sess2["LanguageModelSession — another agent"]
-    DP["DynamicProfile — activates sub-Profile by state"]
-    P["Profile — instructions + params + hooks"]
-    DI["DynamicInstructions — yield instructions/tools"]
-    I["Instructions — model-visible text"]
-    T["Tool — callable capability, auto-schema"]
-    ENV["Environment — cross-session shared object (type-injected)"]
-
-    APP --> SG
-    SG --> Sess1
-    SG --> Sess2
-    Sess1 --> DP
-    Sess2 --> DP
-    DP --> P
-    P --> DI
-    DI --> I
-    DI --> T
-    ENV -.-> Sess1
-    ENV -.-> Sess2
-```
+![Architecture](https://raw.githubusercontent.com/HawkonLi/yao_agent/main/docs/assets/yaoagent-architecture.svg)
 
 Top-down: **App** (optional shell) → **SessionGroup** (multi-agent) → **LanguageModelSession** (agent) → **DynamicProfile** (select Profile) → **Profile** (params + hooks) → **DynamicInstructions** (`yield` instructions & tools). `Environment` flows laterally across sessions.
 

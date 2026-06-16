@@ -2,7 +2,7 @@
 
 > 爻者，言乎变者也。——《易经·系辞》
 
-爻，八卦之本。阴阳二爻不同排列即成不同卦象，六十四卦无非这六条线的组合。
+爻，八卦之本。阴阳二爻不同排列即成不同卦象，六十四卦无非这爻的组合。
 
 YaoAgent 取名于此：**好的智能体不是写出来的，是组合出来的。**
 
@@ -28,31 +28,7 @@ DEEPSEEK_API_KEY=sk-...
 
 ## 概念速览
 
-```mermaid
-graph TD
-    APP["App - 部署/集成外壳（可选）"]
-    SG["SessionGroup - 多智能体编排"]
-    Sess1["LanguageModelSession - 智能体"]
-    Sess2["LanguageModelSession - 智能体"]
-    DP["DynamicProfile - 按 state 激活子 Profile"]
-    P["Profile - 指令 + 参数 + 钩子"]
-    DI["DynamicInstructions - yield 声明指令/工具"]
-    I["Instructions - 模型可见文本"]
-    T["Tool - 可调用能力，schema 自动生成"]
-    ENV["Environment - 跨会话共享对象（按类型注入）"]
-
-    APP --> SG
-    SG --> Sess1
-    SG --> Sess2
-    Sess1 --> DP
-    Sess2 --> DP
-    DP --> P
-    P --> DI
-    DI --> I
-    DI --> T
-    ENV -.-> Sess1
-    ENV -.-> Sess2
-```
+![架构图](https://raw.githubusercontent.com/HawkonLi/yao_agent/main/docs/assets/yaoagent-architecture.svg)
 
 自顶向下：**App**（可选部署外壳）→ **SessionGroup**（多智能体编排）→ **LanguageModelSession**（智能体）→ **DynamicProfile**（智能体配置 Profile）→ **Profile**（静态特征）→ **DynamicInstructions**（`yield` 声明指令与工具）。`Environment` 横向跨会话共享。
 
@@ -154,7 +130,7 @@ async def app_run():
         print(event)
 
 asyncio.run(app_run())
-```
+````
 
 > 上面 6 步展示了 YaoAgent 的完整 DSL：
 >

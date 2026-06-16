@@ -1,15 +1,20 @@
 # YaoAgent
 
-> 像声明 SwiftUI 界面一样声明智能体——用 Python
+> 爻者，言乎变者也。——《易经·系辞》
 
-YaoAgent 是一个声明式、响应式的 Python 智能体框架，灵感来自 Apple Foundation Models 的
-[Dynamic Sessions API](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles)。
+**爻（yáo）**是八卦的基本单元。阴爻与阳爻相叠，生出八卦；八卦两两相重，演为六十四卦——
+天地万象不过两种线段的组合。
 
-把智能体的每一层都变成可组合的 DSL 节点：配置用 `Profile`，指令用 `yield`，
-多智能体用 `SessionGroup`。修饰符链式传参，生命周期钩子 8 种覆盖全流程，
-`EnvironmentObject` 按类型注入实现跨会话共享。框架替你跑编排，你只声明结构与数据流。
+YaoAgent 的名字就取自这个哲学：**好的智能体不是写出来的，是组合出来的**。
 
-**对声明式不熟？从这里开始**：[教学指南 docs/GUIDE.md](docs/GUIDE.md)
+你写好一个个小零件——一段指令、一个工具、一条钩子——然后把它们**声明式地拼在一起**。
+组合改变，行为就跟着改变。框架替你跑编排、管状态、处理错误、记录日志。
+你只决定哪些零件怎么拼。
+
+就像六爻叠加成卦，YaoAgent 用 `yield` 声明指令、`Profile` 绑定参数、`SessionGroup` 编排多智能体。
+层层组合，层层声明。
+
+Inspired by Apple [Foundation Models](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles) dynamic sessions API.
 
 ## 安装
 

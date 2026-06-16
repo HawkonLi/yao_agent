@@ -28,7 +28,6 @@ def load_dotenv(start: str | Path | None = None) -> None:
     global _DOTENV_LOADED
     if _DOTENV_LOADED:
         return
-    _DOTENV_LOADED = True
 
     directory = Path(start or os.getcwd()).resolve()
     for folder in (directory, *directory.parents):
@@ -40,7 +39,10 @@ def load_dotenv(start: str | Path | None = None) -> None:
                     continue
                 key, value = line.split("=", 1)
                 os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+            _DOTENV_LOADED = True
             return
+    # 没找到也标记已扫描，避免每次请求重复遍历文件系统。
+    _DOTENV_LOADED = True
 
 
 class LLMConfig(BaseModel):

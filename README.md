@@ -2,19 +2,12 @@
 
 > 爻者，言乎变者也。——《易经·系辞》
 
-**爻（yáo）**是八卦的基本单元。阴爻与阳爻相叠，生出八卦；八卦两两相重，演为六十四卦——
-天地万象不过两种线段的组合。
+爻，八卦之本。阴阳二爻不同排列即成不同卦象，六十四卦无非这六条线的组合。
 
-YaoAgent 的名字就取自这个哲学：**好的智能体不是写出来的，是组合出来的**。
+YaoAgent 取名于此：**好的智能体不是写出来的，是组合出来的。**
 
-你写好一个个小零件——一段指令、一个工具、一条钩子——然后把它们**声明式地拼在一起**。
-组合改变，行为就跟着改变。框架替你跑编排、管状态、处理错误、记录日志。
-你只决定哪些零件怎么拼。
-
-就像六爻成卦——爻位有初、二、三、四、五、上，YaoAgent 也有自己的一整套"爻"：
-`yield` 拼指令，`Profile` 定参数，`SessionGroup` 编排多智能体，
-生命周期的 8 种钩子观测每一刻，`Environment` 横向注入让零件之间天然共享上下文。
-组合式框架：换几个爻，就是另一个卦。
+指令、工具、钩子、环境就是你的"爻"。声明它们的组织方式——`yield` 编排指令，
+`Profile` 绑定参数与生命周期，`SessionGroup` 编排多智能体——框架替你跑完剩下的。
 
 Inspired by Apple [Foundation Models](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles) dynamic sessions API.
 

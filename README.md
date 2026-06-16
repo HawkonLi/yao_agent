@@ -6,8 +6,8 @@
 
 YaoAgent 取名于此：**好的智能体不是写出来的，是组合出来的。**
 
-指令、工具、钩子、环境就是你的"爻"。声明它们的组织方式——`yield` 编排指令，
-`Profile` 绑定参数与生命周期，`SessionGroup` 编排多智能体——框架替你跑完剩下的。
+声明式组合、响应式求值、生命周期管理、环境注入、工具自愈——把智能体编排抽象成
+一层层可拼装的零件，组合变则行为变。框架替你跑完剩下的。
 
 Inspired by Apple [Foundation Models](https://developer.apple.com/documentation/foundationmodels/composing-dynamic-sessions-with-instructions-and-profiles) dynamic sessions API.
 

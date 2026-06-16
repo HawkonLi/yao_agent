@@ -22,6 +22,36 @@ pip install openai pydantic pyyaml
 DEEPSEEK_API_KEY=sk-...
 ```
 
+## 概念速览
+
+```mermaid
+graph TB
+    subgraph "SessionGroup（多智能体编排）"
+        S1[LanguageModelSession]
+        S2[LanguageModelSession]
+        S1 ~~~ S2
+    end
+    subgraph "LanguageModelSession（一个智能体）"
+        DP[DynamicProfile ─── 按 state 激活一个子 Profile]
+        P[Profile ─── 绑定指令 + 模型参数 + 生命周期钩子]
+        DI[DynamicInstructions ─── yield 声明指令 / 工具 / 嵌套组合]
+        DP --> P --> DI
+    end
+    subgraph "跨会话"
+        ENV[Environment ─── 按类型注入的共享对象]
+        ENV -.-> S1
+        ENV -.-> S2
+    end
+    subgraph "可组合单元"
+        I[Instructions ─── 一段模型可见文本]
+        T[Tool ─── 模型可调用的能力，签名自动生成 schema]
+    end
+    DI -.-> I
+    DI -.-> T
+```
+
+三层声明式结构：**DynamicProfile**（按状态激活一个 Profile）→ **Profile**（绑定参数与钩子）→ **DynamicInstructions**（`yield` 声明指令与工具）。
+
 ## 快速上手
 
 ```python
@@ -29,27 +59,69 @@ import asyncio
 from typing import Annotated
 from yaoagent import *
 
-class GetWeather(Tool):
-    name: str = "get_weather"
-    description: str = "查询城市天气。"
-    def call(self, city: Annotated[str, "城市名"]) -> str:   # 参数 schema 自动生成
-        return f'{{"city": "{city}", "temp": 22}}'
+# ── 第 1 层：工具（签名自动生成 JSON schema）──
+class SearchWeb(Tool):
+    name: str = "search_web"
+    description: str = "搜索互联网。"
+    def call(self, keyword: Annotated[str, "搜索关键词"]) -> str:
+        return f'关于 "{keyword}" 的搜索结果...'
 
-class Assistant(DynamicInstructions):
-    def body(self, session) -> DynamicInstructionStream:     # 生成器 = 声明式组合
-        yield Instructions("你是天气助手，需要时调用工具。")
-        yield GetWeather()
-        if getattr(session.state, "verbose", False):         # 随会话状态响应式分支
-            yield Instructions("回答尽量详细。")
+class Summarize(Tool):
+    name: str = "summarize"
+    description: str = "用本地知识总结一段文本。"
+    def call(self, text: Annotated[str, "待总结文本"]) -> str:
+        return f"摘要：{text[:100]}..."
 
+# ── 第 2 层：指令（yield = 声明式组合，每次请求前重新求值）──
+class ResearchInstructions(DynamicInstructions):
+    def body(self, session) -> DynamicInstructionStream:
+        yield Instructions("你是研究员。先搜索，再总结。用中文回答。")
+        yield SearchWeb()
+        yield Summarize()
+
+# ── 第 3 层：Profile（绑定指令 + 模型参数 + 钩子）──
+class ResearchProfile(DynamicProfile):
+    def body(self, session) -> Profile:
+        return (Profile(instructions=ResearchInstructions())
+                .temperature(0.7)                           # 链式修饰符
+                .model("deepseek-v4-flash")                 # 值类：内层优先
+                .on_tool_call(lambda c: print(f"工具调用: {c.name}")))  # 钩子类：跨层累加
+
+# ── 运行：一行 respond() ——
 async def main():
     session = LanguageModelSession(
-        Assistant(),
-        llm_config=LLMConfig.deepseek("deepseek-v4-flash"),
+        ResearchProfile(),
+        llm_config=LLMConfig.deepseek(),
     )
-    print(await session.respond("北京天气怎么样？"))
+    answer = await session.respond("今天有什么 AI 新闻？")
+    print(answer)       # Response（str 子类），可直接打印
+    print(answer.usage)  # Usage(prompt_tokens=114, completion_tokens=87, total_tokens=201)
 
 asyncio.run(main())
+```
+
+**核心要点**：
+- **三层声明**：`DynamicProfile`（选 Profile）→ `Profile`（绑参数/钩子）→ `DynamicInstructions`（`yield` 编排指令/工具）
+- **`yield` = 声明**——类 SwiftUI 的 `@resultBuilder`，但这是纯 Python 生成器
+- **修饰符链式传递**：`.temperature(0.7).model(...).on_tool_call(...)`
+- **工具签名即 schema**：`Annotated[str, "搜索关键词"]` → 自动生成 JSON schema，无需手写
+
+更进一步——把上面的 Profile 放进多智能体编排：
+
+```python
+class Notebook(EnvironmentObject):
+    notes: list[str] = []
+
+pipeline = (
+    SessionGroup(
+        LanguageModelSession(ResearchProfile()),          # 研究员
+        LanguageModelSession(WritingProfile()),           # 写作助手（读黑板上的笔记）
+    )
+    .group_style(Style.sequential)                       # 串行：一个跑完再跑下一个
+    .environment(Notebook())                              # 共享黑板——穿透所有成员
+    .llm_config(LLMConfig.deepseek())
+)
+answer = await pipeline.run("AI 最新进展")
 ```
 
 ## 核心概念
@@ -295,49 +367,51 @@ class MyProfile(DynamicProfile):
 ## App 级封装（部署 / 集成边界）
 
 `Session` / `SessionGroup` 是“View”（可组合的智能体逻辑）；`App` 是把它们接到外部世界
-（FastAPI、推荐系统、命令行）的最外层外壳——**可选**，框架内直接 `respond()` 即可。模板方法：
-框架定 `run()` 骨架，你只实现 `body()`，按需覆写对外通道。
+（FastAPI、推荐系统、命令行）的最外层外壳——**可选**，框架内直接 `respond()` 即可。
+
+`App` 与 `DynamicProfile` 同一家族：**响应式声明**。你只实现 `body(self, request)`
+（≈ `DynamicProfile.body(self, session)`）——按本次 request 声明编排，每回合状态就地建、
+用 `.environment()` 注入；工具产出的结构化结果由工具**直接转发**到 `runtime.output`，框架收进信封。
 
 ```python
-class ResearchApp(App):
-    def body(self):                       # 要跑什么（每次 run 新建一份 → 请求间隔离）
-        return SessionGroup(...).llm_config(cfg)
-    def on_stream(self, event): ...       # 运行中：流式增量往哪送（默认 no-op）
-    def on_log(self, event): ...          # 运行中：日志往哪送（同时收进信封 events）
+class UMMApp(App):
+    def __init__(self, cfg, *, provider):
+        self.cfg, self.provider, self.umm = cfg, provider, UMMState()
+    def prompt(self, req):   return turn_input(req.query, req.history)   # request → 模型输入
+    def body(self, req):                                                 # 响应式声明
+        return (SessionGroup(
+            LanguageModelSession(MindWeaverProfile()) if req.run_bdi else None,   # 条件成员内联
+            LanguageModelSession(RecommenderProfile(), query=req.query, bdi_mode=req.bdi_mode),
+        ).group_style(Style.sequential).environment(self.umm, self.provider).llm_config(self.cfg))
 
-envelope = await ResearchApp().run("电动汽车的未来")
-# {run_id, output, usage, finish_reason, elapsed_ms, events}
-
-# 想要别的返回形状：覆写 run 调 super() 拿信封再加工（标准 Python，复用全部样板）
-class RecApp(App):
-    def body(self): return SessionGroup(...).llm_config(cfg)
-    async def run(self, input):
-        env = await super().run(input)
-        return {"items": parse(env["output"]), "cost": env["usage"]}
+envelope = await UMMApp(cfg, provider=p).run(RecRequest(query="..."))
+# {run_id, output, outputs, usage, finish_reason, elapsed_ms, events}
+# outputs = 运行中工具直接转发出来的结构化结果（如推荐列表）
 ```
 
-- **隔离**：每次 `run()` 由 `body()` 新建一份 Runnable，并在自己的 `Runtime` + `run_scope` 里执行（基于 ContextVar），并发互不串。
-- **统一出口**：`run()` 返回标准 JSON 信封，便于对接推荐系统等下游。
-- ResearchApp / RecApp 各继承 `App`：运行中通道用 `on_*` 覆写，最终形状用覆写 `run` 调 `super()`——骨架不动。
-- `SessionGroup` 与会话一样统一返回 `Response`：文本由 `output_style` 决定，`usage` 是
-  **全编排所有成员（含嵌套子组、loop 各轮）的累加**（即这次多智能体跑的总成本），故信封 `usage` 对 group 也正常。
+要点（注意：**流程不在 App 里重写**，全交给既有声明式机制）：
+- **强制提交 / 校验** = 工具抛**可恢复 ToolError** 的自愈，不是 App 的 `if`；
+- **结果产出** = 工具 `self.session.runtime.output.send(...)` **直接转发**，不留 holder；
+- **每回合状态/配置** = 就地建 + `.environment()` / `session.state`，不是 App 的工厂方法；
+- **隔离** = 每次 `run()` 由 `body(request)` 新建一份，在自己的 `Runtime` + `run_scope` 里执行（ContextVar）。
+- `SessionGroup` 与会话一样统一返回 `Response`：`usage` 是全编排成员累加，故信封 `usage` 对 group 也正常。
 
 ### 两种交付面：`run()` 批量 / `stream()` 实时
 
-同一个 `body()`（模型层），两种交付：
+同一个 `body(request)`（模型层），两种交付：
 
-- **`run()`** → 阻塞、返回结构化 JSON 信封。适合**离线实验 / 打分 / 后端**（"研究面"）。
-- **`stream()`** → 异步产出**标准 UI 事件流**，给真实**对话助手**前端实时渲染（"服务面"）。
+- **`run(request)`** → 阻塞、返回结构化 JSON 信封。适合**离线实验 / 打分 / 后端**（"研究面"）。
+- **`stream(request)`** → 异步产出**标准 UI 事件流**，给真实**对话助手**前端实时渲染（"服务面"）。
 
 ```python
-async for event in MyApp().stream("上海今天穿什么？先查天气"):
-    # event["type"] ∈ {text, reasoning, tool_call, tool_output, progress, done, error}
+async for event in MyApp(...).stream(request):
+    # event["type"] ∈ {text, reasoning, tool_call, tool_output, output, progress, done, error}
     render(event)
 ```
 
 事件含：`text`（答案增量）/ `reasoning`（思考增量）/ `tool_call` / `tool_output` /
-`progress`（进展流程：group/member/iteration/activate）/ `done`（最终结果）/ `error`。
-`body()` 为单会话时逐 token 流式产出 `text`；为 group 时产出进展/工具事件、最终文本随 `done` 给出。
+`output`（工具直接转发的结构化结果）/ `progress`（group/member/iteration）/ `done` / `error`。
+`body(request)` 为单会话时逐 token 流式产出 `text`；为 group 时产出进展/工具事件、最终文本随 `done` 给出。
 内部用 asyncio 队列把运行中各处事件汇成一条可 `async for` 的流（见 [example_app.py](example_app.py) 场景 5）。
 
 ## 输入（Prompt）

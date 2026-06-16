@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yaoagent"
+version = "0.1.0"
+description = "声明式、响应式的 Python 智能体框架，灵感来自 Apple Foundation Models 的 dynamic sessions API。"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "openai>=1.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+# 测试只需 pytest：异步用例自行 asyncio.run，避免再引 pytest-asyncio。
+dev = ["pytest>=7"]
+
+[project.urls]
+Documentation = "https://github.com/HawkonLi/yaoagent/blob/main/docs/GUIDE.md"
+
+[tool.setuptools]
+packages = ["yaoagent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

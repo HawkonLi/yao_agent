@@ -1,0 +1,92 @@
+<svg viewBox="0 0 780 540" width="780" height="540" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <filter id="shadow" x="-4%" y="-4%" width="108%" height="112%">
+            <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#8e99a8" flood-opacity="0.06"/>
+        </filter>
+        <marker id="arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M 1 1.5 L 7 4 L 1 6.5" fill="none" stroke="#8e99a8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+        <marker id="arrow-env" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M 1 1.5 L 7 4 L 1 6.5" fill="none" stroke="#0daf7a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+    </defs>
+
+    <rect width="780" height="540" fill="#fafbfc" rx="8"/>
+
+    <!-- ── Connection lines ── -->
+    <line x1="330" y1="71" x2="330" y2="79" stroke="#8e99a8" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M 215 232 V 244 H 445 V 232" fill="none" stroke="#8e99a8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="330" y1="244" x2="330" y2="256" stroke="#8e99a8" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="330" y1="338" x2="330" y2="352" stroke="#8e99a8" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="330" y1="394" x2="218" y2="426" stroke="#8e99a8" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="330" y1="394" x2="442" y2="426" stroke="#8e99a8" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M 580 208 H 560 V 160 H 478" fill="none" stroke="#0daf7a" stroke-width="1.2" stroke-dasharray="5 4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-env)" opacity="0.7"/>
+    <line x1="580" y1="208" x2="478" y2="208" stroke="#0daf7a" stroke-width="1.2" stroke-dasharray="5 4" stroke-linecap="round" marker-end="url(#arrow-env)" opacity="0.7"/>
+
+    <!-- ── App container ── -->
+    <rect x="20" y="20" width="620" height="290" rx="12" fill="#f8fafc" stroke="#c8d2dc" stroke-width="1"/>
+    <rect x="32" y="30" width="34" height="20" rx="5" fill="#5a6878"/>
+    <text x="49" y="44" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10" font-weight="700" fill="#ffffff">App</text>
+    <text x="74" y="44" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" font-weight="600" fill="#2e3848">App</text>
+    <text x="104" y="44" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="11" fill="#8e99a8">部署 / 集成外壳（可选）</text>
+
+    <!-- ── SessionGroup container ── -->
+    <rect x="40" y="80" width="580" height="196" rx="10" fill="#f0f4f8" stroke="#8e99a8" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>
+    <rect x="52" y="90" width="100" height="20" rx="5" fill="#5560e2" opacity="0.12"/>
+    <text x="102" y="104" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9.5" font-weight="700" fill="#3a38a8">SessionGroup</text>
+    <text x="160" y="104" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="11" fill="#8e99a8">多智能体编排</text>
+
+    <!-- ── LanguageModelSession 1 ── -->
+    <rect x="60" y="132" width="310" height="48" rx="8" fill="#ffffff" stroke="#b8d0f0" stroke-width="1" filter="url(#shadow)"/>
+    <rect x="60" y="132" width="4" height="48" rx="2" fill="#3578e5"/>
+    <text x="76" y="153" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#1c47b8">LanguageModelSession</text>
+    <text x="76" y="169" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="10.5" fill="#8e99a8">智能体实例</text>
+
+    <!-- ── LanguageModelSession 2 ── -->
+    <rect x="60" y="184" width="310" height="48" rx="8" fill="#ffffff" stroke="#b8d0f0" stroke-width="1" filter="url(#shadow)"/>
+    <rect x="60" y="184" width="4" height="48" rx="2" fill="#3578e5"/>
+    <text x="76" y="205" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#1c47b8">LanguageModelSession</text>
+    <text x="76" y="221" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="10.5" fill="#8e99a8">智能体实例</text>
+
+    <!-- ── DynamicProfile ── -->
+    <rect x="180" y="258" width="300" height="40" rx="8" fill="#ffffff" stroke="#d8cff8" stroke-width="1" filter="url(#shadow)"/>
+    <rect x="180" y="258" width="4" height="40" rx="2" fill="#7b58e8"/>
+    <text x="196" y="275" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#5a2ec0">DynamicProfile</text>
+    <text x="196" y="291" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="10.5" fill="#8e99a8">按 state 激活子 Profile</text>
+
+    <!-- ── Profile ── -->
+    <rect x="180" y="306" width="300" height="40" rx="8" fill="#ffffff" stroke="#c0caec" stroke-width="1" filter="url(#shadow)"/>
+    <rect x="180" y="306" width="4" height="40" rx="2" fill="#5560e2"/>
+    <text x="196" y="323" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#3a38a8">Profile</text>
+    <text x="196" y="339" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="10.5" fill="#8e99a8">指令 + 参数 + 钩子</text>
+
+    <!-- ── DynamicInstructions ── -->
+    <rect x="180" y="354" width="300" height="40" rx="8" fill="#ffffff" stroke="#f5c8e0" stroke-width="1" filter="url(#shadow)"/>
+    <rect x="180" y="354" width="4" height="40" rx="2" fill="#e04590"/>
+    <text x="196" y="371" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#b41870">DynamicInstructions</text>
+    <text x="196" y="387" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="10.5" fill="#8e99a8">yield 声明指令 / 工具</text>
+
+    <!-- ── Instructions ── -->
+    <rect x="90" y="428" width="240" height="40" rx="8" fill="#ffffff" stroke="#a0ecc8" stroke-width="1" filter="url(#shadow)"/>
+    <rect x="90" y="428" width="4" height="40" rx="2" fill="#0daf7a"/>
+    <text x="106" y="445" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#086e50">Instructions</text>
+    <text x="106" y="461" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="10.5" fill="#8e99a8">模型可见文本</text>
+
+    <!-- ── Tool ── -->
+    <rect x="330" y="428" width="240" height="40" rx="8" fill="#ffffff" stroke="#a0ecc8" stroke-width="1" filter="url(#shadow)"/>
+    <rect x="330" y="428" width="4" height="40" rx="2" fill="#0daf7a"/>
+    <text x="346" y="445" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#086e50">Tool</text>
+    <text x="346" y="461" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="10.5" fill="#8e99a8">可调用能力 · schema 自动生成</text>
+
+    <!-- ── Environment ── -->
+    <rect x="580" y="172" width="180" height="72" rx="10" fill="#eafcf2" stroke="#5ce0a8" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="580" y="172" width="5" height="72" rx="2.5" fill="#0daf7a"/>
+    <rect x="596" y="184" width="82" height="18" rx="4" fill="#0daf7a" opacity="0.12"/>
+    <text x="637" y="196" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="9.5" font-weight="700" fill="#086e50">Environment</text>
+    <text x="596" y="220" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="10.5" fill="#5a6878">跨会话共享对象</text>
+    <text x="596" y="234" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif" font-size="10.5" fill="#5a6878">按类型注入</text>
+
+    <!-- ── Footer ── -->
+    <text x="330" y="510" text-anchor="middle" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="10" fill="#c8d2dc" letter-spacing="0.5">YaoAgent · Compositional Architecture</text>
+
+</svg>

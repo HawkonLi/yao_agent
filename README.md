@@ -289,16 +289,16 @@ group 由三个**正交维度**描述（编排约束另外两个的合法取值�
 
 - **编排** **`group_style`**（成员怎么跑）：`Style.sequential` / `Style.parallel` / `Style.loop(until=, max_iters=)`。
 - **输入** **`input_style`**（成员收什么）：`InputStyle.pipe`（上一个输出喂下一个）/ `InputStyle.broadcast`（都拿原输入，靠共享 `environment` 通信）。
-- **输出** **`output_style`**（谁的输出暴露给 group）：`OutputStyle.last` / `OutputStyle.pick(member)` / `OutputStyle.merge(fn)`。
+- **输出** **`output_style`**（谁的输出暴露给 group）：`OutputStyle.last_session` / `OutputStyle.merge(fn)`。
 
 （`input_style` / `output_style` 命名描述的是**智能体之间的内部接线**，与面向用户的运行时输出层
-`Runtime`（见下文）刻意区分。）每种编排自带默认输入/输出（如 sequential = pipe + last，
+`Runtime`（见下文）刻意区分。）每种编排自带默认输入/输出（如 sequential = pipe + last_session，
 parallel = broadcast + merge），按需覆盖；非法组合（如 parallel + pipe）会报错。
 便捷构造 `sequential() / parallel() / loop()` 即"编排 + 默认输入输出"。
 
 ```python
 # 顺序跑、但成员各拿原输入、靠共享环境通信、返回末位成员（而非管道）：
-SessionGroup(a, b).group_style(Style.sequential).input_style(InputStyle.broadcast).output_style(OutputStyle.last)
+SessionGroup(a, b).group_style(Style.sequential).input_style(InputStyle.broadcast).output_style(OutputStyle.last_session)
 ```
 
 - 成员可以是会话，也可以是另一个 `SessionGroup`——递归嵌套。

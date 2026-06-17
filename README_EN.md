@@ -279,7 +279,7 @@ Three orthogonal axes:
 
 - **Style** `group_style`: `Style.sequential` / `Style.parallel` / `Style.loop(until=, max_iters=)`
 - **Input** `input_style`: `InputStyle.pipe` (previous output → next) / `InputStyle.broadcast` (all get original input)
-- **Output** `output_style`: `OutputStyle.last` / `OutputStyle.pick(member)` / `OutputStyle.merge(fn)`
+- **Output** `output_style`: `OutputStyle.last_session` / `OutputStyle.merge(fn)`
 
 Members can be sessions or nested `SessionGroup`s. Parallel = `asyncio.gather`.
 

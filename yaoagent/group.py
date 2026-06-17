@@ -7,8 +7,8 @@ group 由三个**正交维度**描述（彼此原子，编排约束另外两个�
 - **编排 `group_style`**（运行状态）：成员怎么跑——`Style.sequential` / `Style.parallel` / `Style.loop(...)`。
 - **输入 `input_style`**（输入管理）：每个成员收什么——`InputStyle.pipe`（上一个输出喂下一个）/
   `InputStyle.broadcast`（都拿原输入，靠共享 environment 通信）。
-- **输出 `output_style`**（输出管理）：谁的输出暴露给 group——`OutputStyle.last` /
-  `OutputStyle.pick(member)` / `OutputStyle.merge(fn)`。
+- **输出 `output_style`**（输出管理）：谁的输出暴露给 group——`OutputStyle.last_session` /
+  `OutputStyle.merge(fn)`。
 
 （`input_style` / `output_style` 命名描述的是**智能体之间的内部接线**，与面向用户的运行时
 输出层 `Runtime`（log/stream/output 投递口）是两回事，刻意区分。）
@@ -71,22 +71,11 @@ class OutputPolicy(ABC):
         raise NotImplementedError
 
 
-class _Last(OutputPolicy):
+class _LastSession(OutputPolicy):
+    """暴露成员列表中**最后一个 session** 的输出。"""
+
     def collect(self, outputs, members):
         return outputs[-1] if outputs else ""
-
-
-class _Pick(OutputPolicy):
-    """暴露某个**指定成员**的输出（按对象引用匹配，重排/重命名都不破）。"""
-
-    def __init__(self, member: Runnable) -> None:
-        self.member = member
-
-    def collect(self, outputs, members):
-        for index, member in enumerate(members):
-            if member is self.member:
-                return outputs[index]
-        raise ValueError("OutputStyle.pick 指定的成员不在该 group 中。")
 
 
 class _Merge(OutputPolicy):
@@ -100,12 +89,7 @@ class _Merge(OutputPolicy):
 class OutputStyle:
     """输出策略的命名空间。"""
 
-    last: OutputPolicy = _Last()
-
-    @staticmethod
-    def pick(member: Runnable) -> OutputPolicy:
-        """暴露指定成员的输出（传成员对象本身）。"""
-        return _Pick(member)
+    last_session: OutputPolicy = _LastSession()
 
     @staticmethod
     def merge(fn: Callable[[list[str]], str] | None = None) -> OutputPolicy:
@@ -118,7 +102,7 @@ class _Orchestration(ABC):
     """决定成员的执行方式，并自带默认输入/输出。"""
 
     default_inputs: InputStyle = InputStyle.pipe
-    default_outputs: OutputPolicy = OutputStyle.last
+    default_outputs: OutputPolicy = OutputStyle.last_session
 
     def validate(self, inputs: InputStyle) -> None:
         """检查输入策略与本编排是否相容（默认都允许）。"""
@@ -153,7 +137,7 @@ async def _run_member(
 
 class _Sequential(_Orchestration):
     default_inputs = InputStyle.pipe
-    default_outputs = OutputStyle.last
+    default_outputs = OutputStyle.last_session
 
     async def run(self, members, group_input, inputs, outputs, emit=None):
         results: list[Any] = []
@@ -187,7 +171,7 @@ class _Parallel(_Orchestration):
 
 class _Loop(_Orchestration):
     default_inputs = InputStyle.pipe
-    default_outputs = OutputStyle.last
+    default_outputs = OutputStyle.last_session
 
     def __init__(self, until: Callable[[str], bool], max_iters: int = 5) -> None:
         self.until = until
@@ -328,23 +312,34 @@ class SessionGroup:
     @property
     def streamable(self) -> bool:
         """
-        本组能否逐 token 流式：仅当**串行编排 + 输出取末位成员**时（最常见的"流水线末端=主答复者"）。
+        本组能否逐 token 流式：串行 + 末位输出（常见流水线），或并行 + 末位输出（主答复 + 从并发）。
 
-        其余（parallel/loop、merge/pick 非末位输出）无法把单条 token 流对外暴露，
-        调用方（如 `App.stream`）应回退到 `run()`。
+        并行时末位成员的流式增量逐 token 转发，其余成员并发跑并正常发射进度事件。
+        loop / merge 输出不支持流式。
         """
-        out_is_last = self._output_style is None or isinstance(self._output_style, _Last)
-        return isinstance(self._style, _Sequential) and out_is_last and bool(self.members)
+        out_is_last = self._output_style is None or isinstance(self._output_style, _LastSession)
+        if not out_is_last or not self.members:
+            return False
+        if isinstance(self._style, _Sequential):
+            return True
+        if isinstance(self._style, _Parallel):
+            return True
+        return False
 
     async def stream_response(self, input: str) -> AsyncIterator[str]:
         """
-        流式版编排：前置成员照常跑完，**末位（输出）成员逐 token 流式产出**。
+        流式版编排：**末位（输出）成员逐 token 流式产出**。
 
-        前置成员的工具/进展照常发事件；末位成员若本身可流式则逐段产出，否则一次性给出其输出。
+        - 串行：前置成员照常跑完，末位成员流式转发。
+        - 并行：末位成员流式转发的同时，其余成员并发跑并正常发射进度事件；
+          末位结束后等待其余成员收尾。
+
         仅在 `streamable` 为真时可用（否则请用 `run()`）。
         """
         if not self.streamable:
-            raise NotImplementedError("该编排不支持逐 token 流式（仅 串行+末位输出）；请用 run()。")
+            raise NotImplementedError(
+                "该编排不支持逐 token 流式（需 串行/并行 + last_session 输出）；请用 run()。"
+            )
         from .trace import run_scope
 
         self._inject()
@@ -355,21 +350,44 @@ class SessionGroup:
                 style=type(self._style).__name__,
                 members=[type(m).__name__ for m in self.members],
             )
+
+            # 末位 = 输出成员
             *head, last = self.members
-            previous = input
-            for index, member in enumerate(head):
-                member_input = previous if inputs is InputStyle.pipe else input
-                output = await _run_member(member, index, member_input, self._emit)
-                previous = str(output)
             last_index = len(self.members) - 1
-            last_input = previous if inputs is InputStyle.pipe else input
+
+            # 前置成员（或并行时的从成员）：后台跑，不流式
+            slave_tasks: list[asyncio.Task] = []
+            if isinstance(self._style, _Sequential):
+                # 串行：前置成员逐个跑完
+                previous = input
+                for index, member in enumerate(head):
+                    member_input = previous if inputs is InputStyle.pipe else input
+                    output = await _run_member(member, index, member_input, self._emit)
+                    previous = str(output)
+                last_input = previous if inputs is InputStyle.pipe else input
+            else:
+                # 并行：从成员并发启动，主拿原始输入
+                last_input = input
+                for index, member in enumerate(head):
+                    slave_tasks.append(
+                        asyncio.create_task(
+                            _run_member(member, index, input, self._emit)
+                        )
+                    )
+
+            # 末位成员流式输出
             self._emit("member_start", index=last_index, member=type(last).__name__)
             if hasattr(last, "stream_response"):
                 async for delta in last.stream_response(last_input):
                     yield delta
             else:
-                yield str(await last.run(last_input))   # 末位不可流式 → 一次性给出
+                yield str(await last.run(last_input))
             self._emit("member_end", index=last_index, member=type(last).__name__)
+
+            # 并行时等待从成员收尾（它们的进度事件继续发射）
+            if slave_tasks:
+                await asyncio.gather(*slave_tasks, return_exceptions=True)
+
             self._emit("group_end", style=type(self._style).__name__)
 
 

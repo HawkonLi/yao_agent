@@ -292,8 +292,8 @@ answer = await pipeline.run("研究主题")
 - group 由**三个正交维度**描述（编排约束另外两个的合法取值）：
   - **编排 `group_style`**（怎么跑）：`Style.sequential` / `Style.parallel` / `Style.loop(until=, max_iters=)`。
   - **输入 `input_style`**（收什么）：`InputStyle.pipe`（上一个喂下一个）/ `InputStyle.broadcast`（都拿原输入、靠共享 environment 通信）。
-  - **输出 `output_style`**（谁的输出对外）：`OutputStyle.last` / `OutputStyle.pick(member)` / `OutputStyle.merge(fn)`。
-- 每种编排自带默认（sequential = pipe+last，parallel = broadcast+merge），按需覆盖；非法组合（parallel + pipe）报错。
+  - **输出 `output_style`**（谁的输出对外）：`OutputStyle.last_session` / `OutputStyle.merge(fn)`。
+- 每种编排自带默认（sequential = pipe+last_session，parallel = broadcast+merge），按需覆盖；非法组合（parallel + pipe）报错。
 - 便捷函数 `sequential() / parallel() / loop()` = 编排 + 默认输入输出，最短。
 - `input_style` / `output_style` 是**智能体之间的接线**；面向用户的输出（log/stream/output 投递口）是另一层 `Runtime`（见 5.10）。
 
@@ -304,7 +304,7 @@ SessionGroup(a, b).group_style(Style.sequential).input_style(InputStyle.broadcas
 
 > ⚠️ **精修循环的小坑**：`Style.loop` 默认返回**最后一个成员**的输出。所以"写手↔评审"这种，
 > 别让评审的判词成为结果——要么让单个 agent 自我打标记（如 `[OK]`），要么把产物
-> 放进共享 `environment`、循环只用管道值做闸门，或用 `OutputStyle.pick(writer)` 指定输出位。
+> 放进共享 `environment`、循环只用管道值做闸门，或确保末位成员是产出者（默认 `last_session`）。
 
 ### 5.9 日志与实验复现
 

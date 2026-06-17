@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from yaoagent import InputStyle, OutputStyle, Response, SessionGroup, Style, Usage, parallel
+from yaoagent import InputStyle, OutputStyle, Response, SessionGroup, Style, Trace, Usage, parallel
 
 
 class Echo:
@@ -41,10 +41,10 @@ def test_sequential_broadcast():
     assert a.seen == "x" and b.seen == "x"   # 都拿原输入
 
 
-def test_output_pick_by_reference():
+def test_output_last_session():
     a, b = Echo("a"), Echo("b")
-    g = SessionGroup(a, b).group_style(Style.sequential).output_style(OutputStyle.pick(a))
-    assert go(g.run("x")) == "a<-x"
+    g = SessionGroup(a, b).group_style(Style.sequential)
+    assert go(g.run("x")) == "b<-a<-x"   # last_session 暴露末位
 
 
 def test_output_merge():
@@ -108,3 +108,61 @@ def test_nested_group_usage_recurses():
     outer = SessionGroup(inner, UsageEcho("c", (10, 0, 10))).group_style(Style.sequential)
     out = go(outer.run("x"))
     assert out.usage.total_tokens == 20        # 子组 10 + c 10，递归累加
+
+
+class StreamEcho:
+    """支持流式的桩成员：逐字符产出 'X<-input'。"""
+
+    def __init__(self, tag):
+        self.tag = tag
+        self.seen = None
+
+    async def run(self, input):
+        self.seen = input
+        return f"{self.tag}<-{input}"
+
+    async def stream_response(self, input):
+        self.seen = input
+        for ch in f"{self.tag}<-{input}":
+            yield ch
+            await asyncio.sleep(0)
+
+
+def test_parallel_last_session_stream():
+    """并行 + last_session 流式：主的增量逐字转发，从并发跑并发射进度事件。"""
+    events: list[dict] = []
+
+    def sink(e):
+        events.append(e)
+
+    slave = Echo("slave")
+    main = StreamEcho("main")
+    g = (
+        SessionGroup(slave, main)
+        .group_style(Style.parallel)
+        .trace(Trace(sink, level="debug"))
+    )
+    assert g.streamable  # parallel + last_session 可流式
+
+    chunks: list[str] = []
+
+    async def collect():
+        async for chunk in g.stream_response("x"):
+            chunks.append(chunk)
+
+    go(collect())
+    assert "".join(chunks) == "main<-x"
+    assert slave.seen == "x"   # 从正常跑了
+
+    # 验证事件顺序
+    phases = [
+        e["type"]
+        for e in events
+        if e.get("type") in ("group_start", "member_start", "member_end", "group_end")
+    ]
+    assert "group_start" in phases
+    assert "member_start" in phases
+    assert "member_end" in phases
+    assert "group_end" in phases
+    # start 一定在 end 之前
+    assert phases.index("group_start") < phases.index("group_end")

@@ -46,7 +46,7 @@ def test_envelope_basic(fake_model, run):
     fake_model([text_turn("hello", usage=(3, 4, 7))])
 
     class MyApp(App):
-        def body(self):
+        def body(self, request):
             return LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
 
     env = run(MyApp().run("hi"))
@@ -63,7 +63,7 @@ def test_custom_shape_via_super_run(fake_model, run):
     fake_model([text_turn("hello")])
 
     class MyApp(App):
-        def body(self):
+        def body(self, request):
             return LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
 
         async def run(self, input):                 # 覆写 run + super() 拿信封再加工
@@ -84,7 +84,7 @@ def test_output_handler_chain(fake_model, run):
             return Profile(instructions=Sys()).on_response(io.output.response)
 
     class MyApp(App):
-        def body(self):
+        def body(self, request):
             return LanguageModelSession(OutProfile(), llm_config=_cfg())
 
         def on_output(self, event):
@@ -98,7 +98,7 @@ def test_stream_text_reasoning_done(fake_model, run):
     fake_model([stream_text(answer_chunks=["Hel", "lo"], reasoning_chunks=["th-a", "th-b"])])
 
     class MyApp(App):
-        def body(self):
+        def body(self, request):
             return LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
 
     async def collect():
@@ -115,7 +115,7 @@ def test_stream_tool_events(fake_model, run):
     fake_model([stream_tool("ping", "{}"), stream_text(answer_chunks=["ok"])])
 
     class MyApp(App):
-        def body(self):
+        def body(self, request):
             return LanguageModelSession(Profile(instructions=SysWithTool()), llm_config=_cfg())
 
     async def collect():
@@ -138,7 +138,7 @@ def test_stream_group_streams_last_member(fake_model, run):
             return "mind-done"
 
     class MyApp(App):
-        def body(self):
+        def body(self, request):
             rec = LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
             return SessionGroup(Mind(), rec).group_style(Style.sequential)
 
@@ -156,7 +156,7 @@ def test_isolation_fresh_body_each_run(fake_model, run):
     fake_model([text_turn("a"), text_turn("b")])
 
     class MyApp(App):
-        def body(self):
+        def body(self, request):
             return LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
 
     app = MyApp()

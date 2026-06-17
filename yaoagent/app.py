@@ -8,17 +8,13 @@ App 级封装：部署 / 集成的最外层外壳（≈ SwiftUI 的 `App` 协议
 **App 是可选的**——它的价值在于：
 
 1. **统一出口**：`run()` 返回一个标准 JSON 信封 `{run_id, output, usage, finish_reason, elapsed_ms, events}`。
-2. **线程/并发隔离**：每次 `run()` 由 `body()` 新建一份 Runnable（全新 history/state），
+2. **线程/并发隔离**：每次 `run()` 由 `body(request)` 新建一份 Runnable（全新 history/state），
    并在自己的 `Runtime` + `run_scope` 里执行（基于 ContextVar），并发互不串。
 3. **对外通道可覆写**：`on_stream` / `on_output` / `on_log` 三个钩子决定运行**过程中**三个投递口送去哪。
 
-这正是模板方法：框架定 `run()` 的骨架，你只实现 `body()`（要跑什么）+ 按需覆写通道。
-想要不同的最终**形状**，直接覆写 `run` 调 `super()` 即可（标准 Python，复用全部样板）：
-
-    class RecApp(App):
-        async def run(self, input):
-            env = await super().run(input)
-            return {"items": parse(env["output"]), "cost": env["usage"]}
+`body(self, request)` 是响应式声明（≈ `DynamicProfile.body(self, session)`）：按本次 request 声明
+要跑的编排，每回合的状态就在这里就地建、用 `.environment()` 注入。工具产出的结构化结果由工具
+**直接转发**到 `runtime.output`（`self.session.runtime.output.send(...)`），框架收进信封的 `outputs`。
 """
 
 import asyncio
@@ -41,77 +37,78 @@ class App(ABC):
     log_level: str = "info"
 
     @abstractmethod
-    def body(self) -> Runnable:
+    def body(self, request) -> Runnable:
         """
-        返回本次要运行的 Runnable（`LanguageModelSession` 或 `SessionGroup`）。
+        按本次 `request` 声明要跑的 Runnable（`LanguageModelSession` 或 `SessionGroup`）。
 
-        每次 `run()` 都会调用它**新建一份**，从而保证请求间隔离（≈ SwiftUI `var body`）。
+        响应式：每次 `run()/stream()` 都新建一份（请求间隔离）；每回合状态就地建、注入 environment。
         """
         raise NotImplementedError
+
+    def prompt(self, request) -> str:
+        """request → 模型输入（默认当字符串用；结构化请求覆写之）。"""
+        return str(request)
 
     # —— 对外通道（覆写定制；默认空操作）——
     def on_stream(self, event: dict) -> None:
         """运行中途的流式增量（answer/reasoning 文本）。覆写以推 SSE/websocket/终端。"""
 
     def on_output(self, event: dict) -> None:
-        """运行中途由 Profile 投递的结构化输出。覆写以转发给上游。"""
+        """工具直接转发出来的结构化结果。覆写以转发给上游（也会收进信封 outputs）。"""
 
     def on_log(self, event: dict) -> None:
         """日志事件（同时会收进信封的 events）。覆写以接 Trace/监控。"""
 
-    async def run(self, input: str) -> dict:
+    async def run(self, request) -> dict:
         """
-        执行一次：新建 body → 跑 → 汇成并返回标准 JSON 信封。
-
-        想要别的返回形状就覆写本方法、先 `await super().run(input)` 拿信封再加工。
-        需要先配置 runnable（注入状态/环境）再跑的子类，可自建 runnable 后调 `_execute()`。
-        """
-        return await self._execute(self.body(), input)
-
-    async def _execute(self, runnable: Runnable, input: str) -> dict:
-        """
-        把一个 runnable 跑通的固定机制：建 Runtime（三投递口）+ run_scope 隔离 + 接日志主干，
-        执行后汇成标准 JSON 信封 `{run_id, output, usage, finish_reason, elapsed_ms, events}`。
+        执行一次：`body(request)` → 跑 → 汇成并返回标准 JSON 信封
+        `{run_id, output, outputs, usage, finish_reason, elapsed_ms, events}`。
+        `outputs` = 运行中工具直接转发出来的结构化结果（如推荐列表）。
         """
         run_id = uuid.uuid4().hex[:12]
         events: list[dict] = []
+        outputs: list[dict] = []
 
         def log_sink(event: dict) -> None:
             events.append(event)
             self.on_log(event)
 
-        # log 投递口 = 框架 Trace 主干（自动捕获全生命周期）+ 声明式挂到 io.log 的钩子，
-        # 两条都汇入同一个 log_sink → 进信封 events。
+        def output_sink(data: dict) -> None:
+            outputs.append(data)
+            self.on_output(data)
+
         runtime = Runtime(
             log=Handler(log_sink),
             stream=Handler(self.on_stream),
-            output=Handler(self.on_output),
+            output=Handler(output_sink),
         )
         trace = Trace(log_sink, level=self.log_level)
         start = time.perf_counter()
         with use_runtime(runtime), run_scope(run_id):
+            runnable = self.body(request)
             self._attach_trace(runnable, trace)
-            result = await runnable.run(input)
+            result = await runnable.run(self.prompt(request))
 
         usage = getattr(result, "usage", None)
         return {
             "run_id": run_id,
             "output": str(result),
+            "outputs": outputs,
             "usage": vars(usage) if usage is not None else None,
             "finish_reason": getattr(result, "finish_reason", None),
             "elapsed_ms": round((time.perf_counter() - start) * 1000, 1),
             "events": events,
         }
 
-    async def stream(self, input: str) -> AsyncIterator[dict]:
+    async def stream(self, request) -> AsyncIterator[dict]:
         """
         实时服务：把编排全过程以**标准 UI 事件流**逐条产出，供对话助手前端渲染。
 
         事件统一形如 `{"type": ..., ...}`，类型涵盖：
         `text`（流式答案增量）/ `reasoning`（思考增量）/ `tool_call` / `tool_output` /
-        `progress`（进展流程：group/member/iteration/activate）/ `done`（最终结果）/ `error`。
+        `output`（工具直接转发的结构化结果）/ `progress`（group/member/iteration）/ `done` / `error`。
 
-        `body()` 为单会话时逐 token 流式产出 `text`；为 group 时产出进展/工具事件、
+        `body(request)` 为单会话时逐 token 流式产出 `text`；为 group 时产出进展/工具事件、
         最终文本随 `done` 给出（group 暂不支持逐 token 流）。
         """
         queue: asyncio.Queue = asyncio.Queue()
@@ -122,25 +119,29 @@ class App(ABC):
             if ui is not None:
                 queue.put_nowait(ui)
 
-        # 三个投递口 + 日志主干都汇成 UI 事件（debug 级以捕获 reasoning/tool/进展）。
-        runtime = Runtime(log=Handler(push), stream=Handler(push), output=Handler(push))
+        # log/stream 走 _to_ui；output 是工具转发的结构化结果，直接成 {type:"output"} 事件。
+        runtime = Runtime(
+            log=Handler(push),
+            stream=Handler(push),
+            output=Handler(lambda d: queue.put_nowait({"type": "output", "run_id": run_id, **d})),
+        )
         trace = Trace(push, level="debug")
 
         async def drive() -> None:
             try:
                 with use_runtime(runtime), run_scope(run_id):
-                    runnable = self.body()
+                    runnable = self.body(request)
                     self._attach_trace(runnable, trace)
                     # 会话可流式；group 仅在 streamable（串行+末位输出）时逐 token，否则回退 run()。
                     can_stream = hasattr(runnable, "stream_response") and getattr(runnable, "streamable", True)
                     if can_stream:
                         parts: list[str] = []
-                        async for delta in runnable.stream_response(input):  # 文本由生成器直供
+                        async for delta in runnable.stream_response(self.prompt(request)):
                             parts.append(delta)
                             queue.put_nowait({"type": "text", "chunk": delta, "run_id": run_id})
                         output = "".join(parts)
                     else:
-                        output = str(await runnable.run(input))   # 进展/工具走事件，文本随 done
+                        output = str(await runnable.run(self.prompt(request)))
                     queue.put_nowait({"type": "done", "output": output, "run_id": run_id})
             except Exception as exc:  # 转成 UI 错误事件，不静默吞
                 queue.put_nowait({"type": "error", "error": str(exc), "run_id": run_id})

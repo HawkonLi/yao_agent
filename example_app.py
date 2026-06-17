@@ -92,7 +92,7 @@ def _researcher(angle: str) -> LanguageModelSession:
 class ResearchApp(App):
     """research app：body = 并行调研 → 综述；run() 返回标准 JSON 信封。"""
 
-    def body(self) -> SessionGroup:
+    def body(self, request) -> SessionGroup:
         pipeline = SessionGroup(
             parallel(_researcher("技术"), _researcher("商业")),
             LanguageModelSession(Profile(instructions=Synthesizer())),
@@ -131,7 +131,7 @@ class ChatAssistant(DynamicInstructions):
 class ChatApp(App):
     """实时对话助手服务：body 是会话，stream() 把工具/进展/流式文本吐成标准 UI 事件。"""
 
-    def body(self) -> LanguageModelSession:
+    def body(self, request) -> LanguageModelSession:
         return LanguageModelSession(Profile(instructions=ChatAssistant()), llm_config=CFG)
 
 

@@ -227,18 +227,14 @@ class Style:
 # ============================================================ 容器
 class SessionGroup:
     """
-    一组智能体的编排容器：编排 + 输入 + 输出 三轴，加共享环境/连接/日志。
+    一组智能体的编排容器：构造器只收**成员**，其余（编排/输入/输出/环境/连接/日志）走链式修饰符。
 
-    全部配置都可在**构造器**里一次声明（更声明式），或用同名链式方法增量设置：
+        SessionGroup(a, b)
+            .group_style(Style.sequential).input_style(InputStyle.broadcast)
+            .environment(notebook, provider).llm_config(cfg)
 
-        SessionGroup(a, b,
-                     style=Style.sequential,
-                     input_style=InputStyle.broadcast,
-                     output_style=OutputStyle.last,
-                     environment=[notebook, provider],
-                     llm_config=cfg)
-
-    本身满足 `run`，可作为另一个 group 的成员，递归组合出复杂拓扑。
+    成员里的 `None` 会被自动滤除，于是条件包含可内联（`Agent() if cond else None`，
+    类比 SwiftUI ViewBuilder 里的 `if`）。本身满足 `run`，可作为另一个 group 的成员，递归嵌套。
     """
 
     def __init__(
@@ -247,24 +243,14 @@ class SessionGroup:
         style: _Orchestration | None = None,
         input_style: InputStyle | None = None,
         output_style: OutputPolicy | None = None,
-        environment: Any = None,
-        llm_config: "LLMConfig | None" = None,
-        trace: "Trace | None" = None,
     ) -> None:
-        # 成员直接声明在构造器里；`None` 自动滤除，于是条件包含可内联
-        # （`Agent() if cond else None`，类比 SwiftUI ViewBuilder 里的 `if`）。
         self.members = tuple(m for m in members if m is not None)
         self._style = style or Style.sequential
         self._input_style = input_style    # None → 用编排的默认
         self._output_style = output_style  # None → 用编排的默认
-        # 共享环境：构造器可直接传入一个对象或一组对象（按类型登记），等价于链式 .environment()。
         self._environment: dict[type, Any] = {}
-        if environment is not None:
-            objs = environment if isinstance(environment, (list, tuple)) else (environment,)
-            for obj in objs:
-                self._environment[type(obj)] = obj
-        self._llm_config = llm_config
-        self._trace = trace
+        self._llm_config: "LLMConfig | None" = None
+        self._trace: "Trace | None" = None
 
     def group_style(self, style: _Orchestration) -> "SessionGroup":
         """设置编排（运行状态）。"""
@@ -281,9 +267,10 @@ class SessionGroup:
         self._output_style = policy
         return self
 
-    def environment(self, obj: Any) -> "SessionGroup":
-        """注入共享环境对象（按类型登记，向所有成员穿透，可链式）。"""
-        self._environment[type(obj)] = obj
+    def environment(self, *objs: Any) -> "SessionGroup":
+        """注入共享环境对象（可一次多个，按类型登记，向所有成员穿透，可链式）。"""
+        for obj in objs:
+            self._environment[type(obj)] = obj
         return self
 
     def llm_config(self, config: "LLMConfig") -> "SessionGroup":

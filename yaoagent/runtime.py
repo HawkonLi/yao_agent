@@ -65,6 +65,11 @@ class Handler:
     def reasoning_stream(self, chunk: str) -> None:
         self.sink({"event": "reasoning_stream", "chunk": chunk})
 
+    # —— 通用转发：工具产出结构化结果时直接发走（如推荐列表）——
+    def send(self, **data: Any) -> None:
+        """把一份结构化结果直接投递给本口的 sink（工具内 `self.session.runtime.output.send(...)`）。"""
+        self.sink(data)
+
 
 class Runtime:
     """

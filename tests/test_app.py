@@ -1,4 +1,4 @@
-"""App 信封 + 对外通道覆写 + 隔离（用假模型）。"""
+"""App 信封、持久实例、对外通道与并发边界（用假模型）。"""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def test_envelope_basic(fake_model, run):
     fake_model([text_turn("hello", usage=(3, 4, 7))])
 
     class MyApp(App):
-        def body(self, request):
+        def body(self):
             return LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
 
     env = run(MyApp().run("hi"))
@@ -63,7 +63,7 @@ def test_custom_shape_via_super_run(fake_model, run):
     fake_model([text_turn("hello")])
 
     class MyApp(App):
-        def body(self, request):
+        def body(self):
             return LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
 
         async def run(self, input):                 # 覆写 run + super() 拿信封再加工
@@ -84,7 +84,7 @@ def test_output_handler_chain(fake_model, run):
             return Profile(instructions=Sys()).on_response(io.output.response)
 
     class MyApp(App):
-        def body(self, request):
+        def body(self):
             return LanguageModelSession(OutProfile(), llm_config=_cfg())
 
         def on_output(self, event):
@@ -98,7 +98,7 @@ def test_stream_text_reasoning_done(fake_model, run):
     fake_model([stream_text(answer_chunks=["Hel", "lo"], reasoning_chunks=["th-a", "th-b"])])
 
     class MyApp(App):
-        def body(self, request):
+        def body(self):
             return LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
 
     async def collect():
@@ -115,7 +115,7 @@ def test_stream_tool_events(fake_model, run):
     fake_model([stream_tool("ping", "{}"), stream_text(answer_chunks=["ok"])])
 
     class MyApp(App):
-        def body(self, request):
+        def body(self):
             return LanguageModelSession(Profile(instructions=SysWithTool()), llm_config=_cfg())
 
     async def collect():
@@ -138,7 +138,7 @@ def test_stream_group_streams_last_member(fake_model, run):
             return "mind-done"
 
     class MyApp(App):
-        def body(self, request):
+        def body(self):
             rec = LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
             return SessionGroup(Mind(), rec).group_style(Style.sequential)
 
@@ -152,15 +152,108 @@ def test_stream_group_streams_last_member(fake_model, run):
     assert any(e["type"] == "progress" and e.get("phase") == "member_start" for e in events)
 
 
-def test_isolation_fresh_body_each_run(fake_model, run):
+def test_same_app_reuses_session_and_history(fake_model, run):
     fake_model([text_turn("a"), text_turn("b")])
 
     class MyApp(App):
-        def body(self, request):
+        def body(self):
             return LanguageModelSession(Profile(instructions=Sys()), llm_config=_cfg())
 
     app = MyApp()
-    e1 = run(app.run("x"))
-    e2 = run(app.run("y"))
+
+    async def twice():
+        return await app.run("x"), await app.run("y")
+
+    e1, e2 = run(twice())
     assert e1["output"] == "a" and e2["output"] == "b"
-    assert e1["run_id"] != e2["run_id"]     # 每次新 run_id
+    assert e1["run_id"] != e2["run_id"]
+    assert app.runnable.history == [
+        {"role": "user", "content": "x"},
+        {"role": "assistant", "content": "a"},
+        {"role": "user", "content": "y"},
+        {"role": "assistant", "content": "b"},
+    ]
+    session_ids = {
+        event["session_id"]
+        for envelope in (e1, e2)
+        for event in envelope["events"]
+        if event.get("session_id")
+    }
+    assert session_ids == {app.runnable.session_id}
+
+
+def test_same_app_serializes_concurrent_runs(run):
+    class Probe:
+        def __init__(self):
+            self.active = 0
+            self.max_active = 0
+
+        async def run(self, value):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await __import__("asyncio").sleep(0.01)
+            self.active -= 1
+            return value
+
+    class MyApp(App):
+        def body(self):
+            return Probe()
+
+    app = MyApp()
+
+    async def concurrent():
+        return await __import__("asyncio").gather(app.run("a"), app.run("b"))
+
+    outputs = run(concurrent())
+    assert [item["output"] for item in outputs] == ["a", "b"]
+    assert app.runnable.max_active == 1
+
+
+def test_different_apps_can_run_concurrently(run):
+    tracker = {"active": 0, "max_active": 0}
+
+    class Probe:
+        async def run(self, value):
+            tracker["active"] += 1
+            tracker["max_active"] = max(tracker["max_active"], tracker["active"])
+            await __import__("asyncio").sleep(0.01)
+            tracker["active"] -= 1
+            return value
+
+    class MyApp(App):
+        def body(self):
+            return Probe()
+
+    async def concurrent():
+        return await __import__("asyncio").gather(
+            MyApp().run("a"), MyApp().run("b")
+        )
+
+    outputs = run(concurrent())
+    assert [item["output"] for item in outputs] == ["a", "b"]
+    assert tracker["max_active"] == 2
+
+
+def test_prompt_updates_state_before_first_body(run):
+    class Echo:
+        def __init__(self, prefix):
+            self.prefix = prefix
+
+        async def run(self, value):
+            return f"{self.prefix}:{value}"
+
+    class MyApp(App):
+        def __init__(self):
+            super().__init__()
+            self.prefix = None
+
+        def prompt(self, request):
+            self.prefix = request["prefix"]
+            return request["text"]
+
+        def body(self):
+            assert self.prefix is not None
+            return Echo(self.prefix)
+
+    envelope = run(MyApp().run({"prefix": "ready", "text": "go"}))
+    assert envelope["output"] == "ready:go"

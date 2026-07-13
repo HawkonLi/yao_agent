@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import inspect
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -90,6 +91,8 @@ class ResolvedRequest:
     model: str | None = None
     temperature: float | None = None
     reasoning: str | None = None
+    session_id: str | None = None
+    request_id: str | None = None
     # OpenAI 格式的历史消息列表（role/content）。
     history: list[dict[str, Any]] = field(default_factory=list)
     # 来自激活 Profile 的生命周期钩子与历史变换器。
@@ -129,6 +132,7 @@ class LanguageModelSession:
             profile = Profile(instructions=profile)
         # 当前会话关联的（动态）配置接口。
         self.profile = profile
+        self.session_id = uuid.uuid4().hex[:12]
         # 当前会话关联的 LLM 基础连接配置。
         self.llm_config = llm_config
         # 会话私有状态（≈ SwiftUI @State）：推荐传入显式类型化对象（dataclass）；
@@ -182,7 +186,7 @@ class LanguageModelSession:
     def _emit(self, type: str, *, level: str = "info", **data: Any) -> None:
         """若绑定了 trace，则发一条结构化事件。"""
         if self.trace is not None:
-            self.trace.emit(type, level=level, **data)
+            self.trace.emit(type, level=level, session_id=self.session_id, **data)
 
     def describe(self, prompt: str = "") -> dict[str, Any]:
         """
@@ -319,6 +323,7 @@ class LanguageModelSession:
             model=self._resolve_opt(model, "model", profile._model),
             temperature=self._resolve_opt(temperature, "temperature", profile._temperature),
             reasoning=self._resolve_opt(reasoning, "reasoning", profile._reasoning),
+            session_id=self.session_id,
             history=list(self.history),
             prompt_hooks=profile.prompt_hooks,
             response_hooks=profile.response_hooks,
@@ -364,8 +369,15 @@ class LanguageModelSession:
             request = await self._prepare(
                 prompt, model=model, temperature=temperature, reasoning=reasoning
             )
+            request.request_id = uuid.uuid4().hex[:12]
             # request 事件附带解析后的完整配置快照（debug 级可整体复现实验）。
-            self._emit("request", level="debug", prompt=prompt, config=self.describe(prompt))
+            self._emit(
+                "request",
+                level="debug",
+                request_id=request.request_id,
+                prompt=prompt,
+                config=self.describe(prompt),
+            )
             start = time.perf_counter()
             try:
                 # 在工具循环期间把本会话绑定为当前会话，供工具通过 self.session 访问。
@@ -380,7 +392,12 @@ class LanguageModelSession:
             self.history.extend(turn)
             elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
             self._emit(
-                "response", text=text, usage=usage, finish_reason=finish_reason, elapsed_ms=elapsed_ms
+                "response",
+                request_id=request.request_id,
+                text=text,
+                usage=usage,
+                finish_reason=finish_reason,
+                elapsed_ms=elapsed_ms,
             )
             return Response(text, usage=Usage(**usage), finish_reason=finish_reason)
 
@@ -437,7 +454,14 @@ class LanguageModelSession:
         request = await self._prepare(
             prompt, model=model, temperature=temperature, reasoning=reasoning
         )
-        self._emit("request", level="debug", prompt=prompt, config=self.describe(prompt))
+        request.request_id = uuid.uuid4().hex[:12]
+        self._emit(
+            "request",
+            level="debug",
+            request_id=request.request_id,
+            prompt=prompt,
+            config=self.describe(prompt),
+        )
         turn: list[dict[str, Any]] = []
         with bind_session(self):
             async for delta in stream(request, self.llm_config, turn, emit=self._emit):

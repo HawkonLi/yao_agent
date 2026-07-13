@@ -8,12 +8,12 @@ App 级封装：部署 / 集成的最外层外壳（≈ SwiftUI 的 `App` 协议
 **App 是可选的**——它的价值在于：
 
 1. **统一出口**：`run()` 返回一个标准 JSON 信封 `{run_id, output, usage, finish_reason, elapsed_ms, events}`。
-2. **线程/并发隔离**：每次 `run()` 由 `body(request)` 新建一份 Runnable（全新 history/state），
-   并在自己的 `Runtime` + `run_scope` 里执行（基于 ContextVar），并发互不串。
+2. **实例生命周期**：`body()` 声明的 Runnable 树由 App 实例持有，多次 `run()` 复用其 history/state；
+   同一 App 串行执行，不同 App 可安全并发。
 3. **对外通道可覆写**：`on_stream` / `on_output` / `on_log` 三个钩子决定运行**过程中**三个投递口送去哪。
 
-`body(self, request)` 是响应式声明（≈ `DynamicProfile.body(self, session)`）：按本次 request 声明
-要跑的编排，每回合的状态就在这里就地建、用 `.environment()` 注入。工具产出的结构化结果由工具
+`body(self)` 声明 App 持有的 Runnable 树；请求通过 `prompt(request)` 增量送入该树。
+需要独立对话时创建新的 App 实例。工具产出的结构化结果由工具
 **直接转发**到 `runtime.output`（`self.session.runtime.output.send(...)`），框架收进信封的 `outputs`。
 """
 
@@ -36,18 +36,30 @@ class App(ABC):
     # 收进信封 events 的日志级别（"info" 精简；"debug" 含工具轮次与配置快照）。
     log_level: str = "info"
 
-    @abstractmethod
-    def body(self, request) -> Runnable:
-        """
-        按本次 `request` 声明要跑的 Runnable（`LanguageModelSession` 或 `SessionGroup`）。
+    def __init__(self) -> None:
+        self.app_id = uuid.uuid4().hex[:12]
+        self._root: Runnable | None = None
+        self._run_lock = asyncio.Lock()
 
-        响应式：每次 `run()/stream()` 都新建一份（请求间隔离）；每回合状态就地建、注入 environment。
+    @abstractmethod
+    def body(self) -> Runnable:
+        """
+        声明本 App 持有的 Runnable（`LanguageModelSession` 或 `SessionGroup`）。
+
+        每个 App 实例只求值一次；多次 `run()/stream()` 复用同一棵树。
         """
         raise NotImplementedError
 
     def prompt(self, request) -> str:
         """request → 模型输入（默认当字符串用；结构化请求覆写之）。"""
         return str(request)
+
+    @property
+    def runnable(self) -> Runnable:
+        """惰性构造并返回本 App 持有的 Runnable 树。"""
+        if self._root is None:
+            self._root = self.body()
+        return self._root
 
     # —— 对外通道（覆写定制；默认空操作）——
     def on_stream(self, event: dict) -> None:
@@ -61,7 +73,7 @@ class App(ABC):
 
     async def run(self, request) -> dict:
         """
-        执行一次：`body(request)` → 跑 → 汇成并返回标准 JSON 信封
+        执行一次：复用 `body()` 的 Runnable 树 → 跑 → 汇成并返回标准 JSON 信封
         `{run_id, output, outputs, usage, finish_reason, elapsed_ms, events}`。
         `outputs` = 运行中工具直接转发出来的结构化结果（如推荐列表）。
         """
@@ -82,12 +94,21 @@ class App(ABC):
             stream=Handler(self.on_stream),
             output=Handler(output_sink),
         )
-        trace = Trace(log_sink, level=self.log_level)
+        trace = Trace(log_sink, level=self.log_level, context={"app_id": self.app_id})
         start = time.perf_counter()
-        with use_runtime(runtime), run_scope(run_id):
-            runnable = self.body(request)
-            self._attach_trace(runnable, trace)
-            result = await runnable.run(self.prompt(request))
+        async with self._run_lock:
+            with use_runtime(runtime), run_scope(run_id):
+                prompt = self.prompt(request)
+                runnable = self.runnable
+                self._attach_trace(runnable, trace)
+                trace.emit("app_start")
+                try:
+                    result = await runnable.run(prompt)
+                except Exception as exc:
+                    trace.emit("app_error", level="error", error=str(exc))
+                    raise
+                finally:
+                    trace.emit("app_end")
 
         usage = getattr(result, "usage", None)
         return {
@@ -108,7 +129,7 @@ class App(ABC):
         `text`（流式答案增量）/ `reasoning`（思考增量）/ `tool_call` / `tool_output` /
         `output`（工具直接转发的结构化结果）/ `progress`（group/member/iteration）/ `done` / `error`。
 
-        `body(request)` 为单会话时逐 token 流式产出 `text`；为 group 时产出进展/工具事件、
+        `body()` 为单会话时逐 token 流式产出 `text`；为 group 时产出进展/工具事件、
         最终文本随 `done` 给出（group 暂不支持逐 token 流）。
         """
         queue: asyncio.Queue = asyncio.Queue()
@@ -125,24 +146,33 @@ class App(ABC):
             stream=Handler(push),
             output=Handler(lambda d: queue.put_nowait({"type": "output", "run_id": run_id, **d})),
         )
-        trace = Trace(push, level="debug")
+        trace = Trace(push, level="debug", context={"app_id": self.app_id})
 
         async def drive() -> None:
             try:
-                with use_runtime(runtime), run_scope(run_id):
-                    runnable = self.body(request)
-                    self._attach_trace(runnable, trace)
-                    # 会话可流式；group 仅在 streamable（串行+末位输出）时逐 token，否则回退 run()。
-                    can_stream = hasattr(runnable, "stream_response") and getattr(runnable, "streamable", True)
-                    if can_stream:
-                        parts: list[str] = []
-                        async for delta in runnable.stream_response(self.prompt(request)):
-                            parts.append(delta)
-                            queue.put_nowait({"type": "text", "chunk": delta, "run_id": run_id})
-                        output = "".join(parts)
-                    else:
-                        output = str(await runnable.run(self.prompt(request)))
-                    queue.put_nowait({"type": "done", "output": output, "run_id": run_id})
+                async with self._run_lock:
+                    with use_runtime(runtime), run_scope(run_id):
+                        prompt = self.prompt(request)
+                        runnable = self.runnable
+                        self._attach_trace(runnable, trace)
+                        trace.emit("app_start")
+                        try:
+                            # 会话可流式；group 仅在 streamable 时逐 token，否则回退 run()。
+                            can_stream = hasattr(runnable, "stream_response") and getattr(runnable, "streamable", True)
+                            if can_stream:
+                                parts: list[str] = []
+                                async for delta in runnable.stream_response(prompt):
+                                    parts.append(delta)
+                                    queue.put_nowait({"type": "text", "chunk": delta, "run_id": run_id})
+                                output = "".join(parts)
+                            else:
+                                output = str(await runnable.run(prompt))
+                        except Exception as exc:
+                            trace.emit("app_error", level="error", error=str(exc))
+                            raise
+                        finally:
+                            trace.emit("app_end")
+                        queue.put_nowait({"type": "done", "output": output, "run_id": run_id})
             except Exception as exc:  # 转成 UI 错误事件，不静默吞
                 queue.put_nowait({"type": "error", "error": str(exc), "run_id": run_id})
             finally:
@@ -164,7 +194,12 @@ class App(ABC):
         kind = event.get("type")
         run_id = event.get("run_id")
         if kind == "tool_call":
-            return {"type": "tool_call", "name": event.get("name"), "arguments": event.get("arguments"), "run_id": run_id}
+            return {
+                "type": "tool_call",
+                "name": event.get("name"),
+                "arguments": event.get("arguments"),
+                "run_id": run_id,
+            }
         if kind == "tool_output":
             return {"type": "tool_output", "name": event.get("name"), "output": event.get("output"), "run_id": run_id}
         if kind == "reasoning_stream":
@@ -179,9 +214,10 @@ class App(ABC):
 
     @staticmethod
     def _attach_trace(runnable: Runnable, trace: Trace) -> None:
-        """把日志主干接到本次 runnable（成员自带的优先，不覆盖）。"""
+        """把当前 run 的日志主干接到持久 Runnable 树。"""
         if isinstance(runnable, SessionGroup):
-            if runnable._trace is None:
-                runnable.trace(trace)
-        elif getattr(runnable, "trace", None) is None:
+            runnable._trace = trace
+            for member in runnable.members:
+                App._attach_trace(member, trace)
+        elif hasattr(runnable, "trace"):
             runnable.trace = trace

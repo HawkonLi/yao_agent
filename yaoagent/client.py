@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Iterable
 
 from openai import AsyncOpenAI, OpenAIError
@@ -61,6 +62,69 @@ def _accumulate_usage(total: dict[str, int], usage: Any) -> None:
         return
     for key in total:
         total[key] += getattr(usage, key, 0) or 0
+
+
+def _is_deepseek(options: dict[str, Any], model: str | None = None) -> bool:
+    """识别官方端点或经 OpenAI-compatible 代理暴露的 DeepSeek 模型。"""
+    return "deepseek.com" in options["api_base_url"] or "deepseek" in (model or "").lower()
+
+
+def _request_kwargs(request, options, model, messages, tools_payload=None, *, stream=False):
+    kwargs: dict[str, Any] = {"model": model, "messages": messages}
+    if stream:
+        kwargs["stream"] = True
+    if tools_payload:
+        kwargs["tools"] = tools_payload
+    if request.temperature is not None:
+        kwargs["temperature"] = request.temperature
+    thinking = options.get("extra_body", {}).get("thinking", {}).get("type")
+    if request.reasoning is not None and not (_is_deepseek(options, model) and thinking == "disabled"):
+        kwargs["reasoning_effort"] = request.reasoning
+    if options.get("extra_body"):
+        kwargs["extra_body"] = options["extra_body"]
+    return kwargs
+
+
+def _message_snapshot(message) -> dict[str, Any]:
+    """把 provider message 裁成可 JSON 化、可重放审计的原始结构。"""
+    return {
+        "content": message.content,
+        "reasoning_content": getattr(message, "reasoning_content", None),
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": call.type,
+                "function": {
+                    "name": call.function.name,
+                    "arguments": call.function.arguments,
+                },
+            }
+            for call in (message.tool_calls or [])
+        ],
+    }
+
+
+def _response_event(response, message, provider_call_id, request_id, round_index):
+    reasoning = getattr(message, "reasoning_content", None) or ""
+    usage = getattr(response, "usage", None)
+    return {
+        "provider_call_id": provider_call_id,
+        "request_id": request_id,
+        "round": round_index,
+        "response_id": getattr(response, "id", None),
+        "model": getattr(response, "model", None),
+        "system_fingerprint": getattr(response, "system_fingerprint", None),
+        "finish_reason": response.choices[0].finish_reason,
+        "reasoning_present": bool(reasoning),
+        "reasoning_chars": len(reasoning),
+        "reasoning_content": reasoning or None,
+        "tool_call_count": len(message.tool_calls or []),
+        "message": _message_snapshot(message),
+        "usage": {k: getattr(usage, k, None) for k in (
+            "prompt_tokens", "completion_tokens", "total_tokens",
+            "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
+        )} if usage is not None else None,
+    }
 
 
 def build_messages(request: "ResolvedRequest", history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -117,16 +181,19 @@ async def complete(
     # 提示已进入请求、发起前触发 onPrompt。
     await _fire(request.prompt_hooks, request.prompt)
 
-    for _ in range(rounds):
-        kwargs: dict[str, Any] = {"model": model, "messages": messages}
-        if tools_payload:
-            kwargs["tools"] = tools_payload
-        if request.temperature is not None:
-            kwargs["temperature"] = request.temperature
-        if request.reasoning is not None:
-            # OpenAI 标准的推理力度字段，DeepSeek v4 系列支持。
-            kwargs["reasoning_effort"] = request.reasoning
-
+    for round_index in range(rounds):
+        kwargs = _request_kwargs(request, options, model, messages, tools_payload)
+        provider_call_id = uuid.uuid4().hex[:12]
+        if emit:
+            emit(
+                "provider_request",
+                level="debug",
+                request_id=request.request_id,
+                provider_call_id=provider_call_id,
+                round=round_index,
+                provider={"api_base_url": options["api_base_url"], "timeout": options["timeout"]},
+                payload=kwargs,
+            )
         try:
             response = await client.chat.completions.create(**kwargs)
         except OpenAIError as exc:
@@ -135,6 +202,9 @@ async def complete(
             ) from exc
         _accumulate_usage(usage, getattr(response, "usage", None))
         message = response.choices[0].message
+        if emit:
+            emit("provider_response", level="debug",
+                 **_response_event(response, message, provider_call_id, request.request_id, round_index))
 
         if not message.tool_calls:
             text = message.content or ""
@@ -155,12 +225,24 @@ async def complete(
                 for tc in message.tool_calls
             ],
         }
+        reasoning_content = getattr(message, "reasoning_content", None)
+        if _is_deepseek(options, model) and reasoning_content:
+            assistant_msg["reasoning_content"] = reasoning_content
         messages.append(assistant_msg)
         turn.append(assistant_msg)
         for raw_call in message.tool_calls:
             name = raw_call.function.name
             if emit:
-                emit("tool_call", level="debug", name=name, arguments=raw_call.function.arguments)
+                emit(
+                    "tool_call",
+                    level="debug",
+                    request_id=request.request_id,
+                    provider_call_id=provider_call_id,
+                    round=round_index,
+                    call_id=raw_call.id,
+                    name=name,
+                    arguments=raw_call.function.arguments,
+                )
             try:
                 output = await _execute_tool_call(
                     name, raw_call.function.arguments, tools_by_name, request
@@ -171,7 +253,16 @@ async def complete(
                 # 可恢复错误：把自然语言解释作为工具结果回灌，让模型在下一轮改正重试。
                 output = f"工具调用失败，请修正后重试：{err.explain()}"
             if emit:
-                emit("tool_output", level="debug", name=name, output=output)
+                emit(
+                    "tool_output",
+                    level="debug",
+                    request_id=request.request_id,
+                    provider_call_id=provider_call_id,
+                    round=round_index,
+                    call_id=raw_call.id,
+                    name=name,
+                    output=output,
+                )
             tool_msg = {"role": "tool", "tool_call_id": raw_call.id, "content": output}
             messages.append(tool_msg)
             turn.append(tool_msg)
@@ -219,17 +310,21 @@ async def stream(
 
     await _fire(request.prompt_hooks, request.prompt)
 
-    for _ in range(max_tool_rounds):
-        # 获取环境参数
-        kwargs: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
-        if tools_payload:
-            kwargs["tools"] = tools_payload
-        if request.temperature is not None:
-            kwargs["temperature"] = request.temperature
-        if request.reasoning is not None:
-            kwargs["reasoning_effort"] = request.reasoning
-
+    for round_index in range(max_tool_rounds):
+        kwargs = _request_kwargs(request, options, model, messages, tools_payload, stream=True)
+        provider_call_id = uuid.uuid4().hex[:12]
+        if emit:
+            emit(
+                "provider_request",
+                level="debug",
+                request_id=request.request_id,
+                provider_call_id=provider_call_id,
+                round=round_index,
+                provider={"api_base_url": options["api_base_url"], "timeout": options["timeout"]},
+                payload=kwargs,
+            )
         content = ""
+        reasoning_content = ""
         # 按 index 增量拼装分片到达的 tool_calls。
         tool_acc: dict[int, dict[str, Any]] = {}
         try:
@@ -241,6 +336,7 @@ async def stream(
                 # 思考(reasoning)增量：只走钩子/日志，不产出、不进 transcript。
                 reasoning = getattr(delta, "reasoning_content", None)
                 if reasoning:
+                    reasoning_content += reasoning
                     await _fire(request.reasoning_stream_hooks, reasoning)
                     if emit:
                         emit("reasoning_stream", level="debug", chunk=reasoning)
@@ -263,6 +359,26 @@ async def stream(
                 code=ErrorCode.MODEL_REQUEST_FAILED, cause=exc, model=model
             ) from exc
 
+        if emit:
+            emit(
+                "provider_response",
+                level="debug",
+                request_id=request.request_id,
+                provider_call_id=provider_call_id,
+                round=round_index,
+                finish_reason=None,
+                reasoning_present=bool(reasoning_content),
+                reasoning_chars=len(reasoning_content),
+                reasoning_content=reasoning_content or None,
+                tool_call_count=len(tool_acc),
+                message={
+                    "content": content,
+                    "reasoning_content": reasoning_content or None,
+                    "tool_calls": [tool_acc[index] for index in sorted(tool_acc)],
+                },
+                usage=None,
+            )
+
         if not tool_acc:
             # 无工具调用：本轮内容即最终回复。
             turn.append({"role": "assistant", "content": content})
@@ -284,11 +400,22 @@ async def stream(
                 for tc in ordered
             ],
         }
+        if _is_deepseek(options, model) and reasoning_content:
+            assistant_msg["reasoning_content"] = reasoning_content
         messages.append(assistant_msg)
         turn.append(assistant_msg)
         for tc in ordered:
             if emit:
-                emit("tool_call", level="debug", name=tc["name"], arguments=tc["arguments"])
+                emit(
+                    "tool_call",
+                    level="debug",
+                    request_id=request.request_id,
+                    provider_call_id=provider_call_id,
+                    round=round_index,
+                    call_id=tc["id"],
+                    name=tc["name"],
+                    arguments=tc["arguments"],
+                )
             try:
                 output = await _execute_tool_call(
                     tc["name"], tc["arguments"], tools_by_name, request
@@ -298,7 +425,16 @@ async def stream(
                     raise
                 output = f"工具调用失败，请修正后重试：{err.explain()}"
             if emit:
-                emit("tool_output", level="debug", name=tc["name"], output=output)
+                emit(
+                    "tool_output",
+                    level="debug",
+                    request_id=request.request_id,
+                    provider_call_id=provider_call_id,
+                    round=round_index,
+                    call_id=tc["id"],
+                    name=tc["name"],
+                    output=output,
+                )
             tool_msg = {"role": "tool", "tool_call_id": tc["id"], "content": output}
             messages.append(tool_msg)
             turn.append(tool_msg)

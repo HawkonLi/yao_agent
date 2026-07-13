@@ -334,7 +334,18 @@ Profile(instructions=...)
     .on_reasoning_stream(handle_thinking)  # 思考增量（不想要就不写这行）
 ```
 
-`stream_response()` 产出的流只含答案；思考只走 `on_reasoning_stream`，不混进答案、不进 transcript。
+`stream_response()` 产出的流只含答案；思考不混进答案。最终回复的思考仅进入 debug 审计日志；
+DeepSeek 工具轮的 `reasoning_content` 会按其协议保留在 transcript，并在下一轮随 assistant tool call 回写。
+
+DeepSeek thinking mode 由连接配置显式声明：
+
+```python
+cfg = LLMConfig.deepseek("deepseek-v4-flash", thinking="enabled")
+cfg = LLMConfig.deepseek("deepseek-v4-flash", thinking="disabled")
+```
+
+`thinking="disabled"` 时框架仍原样发送 `temperature`，并自动省略与关闭思考冲突的
+`reasoning_effort`；未指定 `thinking` 时不注入 provider 扩展字段。
 
 ## 日志与可观测（实验复现）
 
@@ -347,10 +358,12 @@ session = LanguageModelSession(
 )
 ```
 
-- 事件类型：`request`（含解析后的**完整配置快照**）/ `tool_call` / `tool_output` /
-  `response`（含 token 用量与 `elapsed_ms`）/ `activate` / `deactivate` / `error`；
-  多智能体编排另有 `group_start` / `group_end` / `member_start` / `member_end` / `iteration`。`debug` 级近乎全量。
-- **关联 ID**：同一次 run（含其编排里所有成员/工具轮次）的事件共享一个 `run_id`，并发/嵌套时可归并到一条时间线。
+- 事件类型：`request`（解析后的配置快照）/ `provider_request` / `provider_response` /
+  `tool_call` / `tool_output` / `response`（token 用量与 `elapsed_ms`）/ `activate` / `deactivate` /
+  `error`；多智能体编排另有 `group_start` / `group_end` / `member_start` / `member_end` /
+  `iteration`。`info` 保持轻量，`debug` 保存完整 provider payload、响应结构和 reasoning，便于原地审计。
+- **关联 ID**：`app_id → run_id → group_id/session_id → request_id → provider_call_id → call_id`
+  串起 App、编排成员、逻辑请求、低层 API 工具轮与工具调用；同一 App 的 `session_id` 跨 run 保持稳定。
 - `SessionGroup.trace(t)` 把日志向所有成员穿透（成员自带的优先），整组事件自动带同一个 `run_id`。
 - 内置 sink：`jsonl(path)`（一行一条，适合实验）、`console`；自定义就传任意 `lambda e: ...`。
 - 接 SwanLab 等外部实验平台：`Trace(lambda e: swanlab.log(e))`——**适配器写在你的实验代码里，不进框架**。
@@ -389,6 +402,10 @@ class MyProfile(DynamicProfile):
 （FastAPI、推荐系统、命令行）的最外层外壳——**可选**，框架内直接 `respond()` 即可。
 
 参见上方快速上手第 6 步的完整示例，以及 [example\_app.py](example_app.py)。
+
+`body()` 在每个 App 实例中只求值一次，构造出的 Session/SessionGroup 成员、history 与 state 会被后续
+`run()` / `stream()` 复用；传入的 request 经 `prompt()` 转成增量输入。需要独立对话时新建 App。
+同一 App 内部串行执行以保护会话历史，不同 App 实例可以并发。因此 App 也是自然的并发与会话边界。
 
 ## 输入（Prompt）
 

@@ -317,12 +317,32 @@ session = LanguageModelSession(
 )
 ```
 
-事件类型：`request`（含解析后的**完整配置快照**）/ `tool_call` / `tool_output` /
-`response`（含 token 用量）/ `activate` / `deactivate` / `error`。
-`sink` 就是个 `Callable[[dict], None]`——接 SwanLab 等只需 `Trace(lambda e: swanlab.log(e))`，
-**适配器写在你的实验代码里，不进框架**。
+事件类型：`request` / `provider_request` / `provider_response` / `tool_call` / `tool_output` /
+`response` / `activate` / `deactivate` / `error`。`info` 日志保持轻量；`debug` 记录完整 provider
+请求 payload、响应/思考结构与 token/cache 字段。`app_id → run_id → group_id/session_id → request_id
+→ provider_call_id → call_id` 可直接还原 App、成员、逻辑请求、低层工具轮和工具调用关系。
+
+`sink` 就是个 `Callable[[dict], None]`——接 SwanLab 或日志看板只需
+`Trace(lambda e: swanlab.log(e))`，**适配器写在你的实验代码里，不进框架**。
 
 随时导出当前配置：`session.describe()` 返回指令、工具 schema、模型参数、状态的快照。
+
+
+### 5.11 App 生命周期与并发边界
+
+`App.body()` 不接 request，并且在一个 App 实例中只求值一次。其 Session/SessionGroup 树、成员、
+history 与 state 会持续复用；每次 `run(request)` 只把 `prompt(request)` 的结果作为增量输入。
+同一 App 串行运行，不同 App 可并发。需要新会话时直接实例化一个新 App。
+
+### 5.12 DeepSeek thinking mode
+
+```python
+thinking = LLMConfig.deepseek("deepseek-v4-flash", thinking="enabled")
+non_thinking = LLMConfig.deepseek("deepseek-v4-flash", thinking="disabled")
+```
+
+工具轮中 DeepSeek 返回的 `reasoning_content` 会随 assistant tool call 写入 history 并回传下一轮；
+关闭 thinking 时不会发送冲突的 `reasoning_effort`。完整请求与响应可在 debug trace 中审计。
 
 ---
 

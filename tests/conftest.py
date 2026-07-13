@@ -32,17 +32,29 @@ def _tool_call(call_id, name, arguments, index=0):
     )
 
 
-def text_turn(content, *, finish_reason="stop", usage=(1, 1, 2)):
+def text_turn(content, *, finish_reason="stop", usage=(1, 1, 2), reasoning=None):
     """一轮：模型直接给文本（非流式）。"""
-    msg = SimpleNamespace(content=content, tool_calls=[], reasoning_content=None)
-    return SimpleNamespace(choices=[SimpleNamespace(message=msg, finish_reason=finish_reason)], usage=_usage(*usage))
+    msg = SimpleNamespace(content=content, tool_calls=[], reasoning_content=reasoning)
+    return SimpleNamespace(
+        id="response_text",
+        model="deepseek-test",
+        system_fingerprint="fp_test",
+        choices=[SimpleNamespace(message=msg, finish_reason=finish_reason)],
+        usage=_usage(*usage),
+    )
 
 
-def tool_turn(name, arguments, *, call_id="call_1", usage=(1, 1, 2)):
+def tool_turn(name, arguments, *, call_id="call_1", usage=(1, 1, 2), reasoning=None):
     """一轮：模型请求调用工具（非流式）。"""
     tc = _tool_call(call_id, name, arguments)
-    msg = SimpleNamespace(content=None, tool_calls=[tc], reasoning_content=None)
-    return SimpleNamespace(choices=[SimpleNamespace(message=msg, finish_reason="tool_calls")], usage=_usage(*usage))
+    msg = SimpleNamespace(content=None, tool_calls=[tc], reasoning_content=reasoning)
+    return SimpleNamespace(
+        id="response_tool",
+        model="deepseek-test",
+        system_fingerprint="fp_test",
+        choices=[SimpleNamespace(message=msg, finish_reason="tool_calls")],
+        usage=_usage(*usage),
+    )
 
 
 def _chunk(*, content=None, reasoning=None, tool_pieces=None):
@@ -62,10 +74,12 @@ def stream_text(*, answer_chunks=(), reasoning_chunks=()):
     return gen()
 
 
-def stream_tool(name, arguments, *, call_id="call_1"):
+def stream_tool(name, arguments, *, call_id="call_1", reasoning_chunks=()):
     """一轮（流式）：分片吐一个工具调用。"""
 
     async def gen():
+        for reasoning in reasoning_chunks:
+            yield _chunk(reasoning=reasoning)
         # name 在首片，arguments 拆两段。
         mid = len(arguments) // 2
         yield _chunk(tool_pieces=[_tool_call(call_id, name, arguments[:mid], index=0)])
@@ -79,8 +93,10 @@ class _FakeCompletions:
     def __init__(self, script):
         self._script = list(script)
         self.calls = 0
+        self.requests = []
 
     async def create(self, **kwargs):
+        self.requests.append(kwargs)
         item = self._script[self.calls]
         self.calls += 1
         return item  # 非流式=响应对象；流式=async generator（两者 create 都直接返回）

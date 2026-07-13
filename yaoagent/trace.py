@@ -7,8 +7,8 @@ from __future__ import annotations
 **sink**(就是 `Callable[[dict], None]`,不搞类层级)。实验留档 = 用 `jsonl` sink;
 接 SwanLab 等 = 自己写一个 `lambda e: ...` sink(适配器在你的代码里,不进框架)。
 
-事件类型:request / tool_call / tool_output / response / activate / deactivate / error。
-debug 级几乎全量(含解析后的完整配置快照),便于复现实验。
+事件覆盖 App、group、逻辑请求、provider 调用、工具与响应生命周期。
+info 级保持轻量；debug 级含完整 provider 请求/响应快照，便于复现实验和驱动看板。
 """
 
 import contextvars
@@ -78,14 +78,15 @@ class Trace:
     不传 sink 时默认打到控制台。
     """
 
-    def __init__(self, *sinks: Sink, level: str = "info") -> None:
+    def __init__(self, *sinks: Sink, level: str = "info", context: dict[str, Any] | None = None) -> None:
         self.sinks: list[Sink] = list(sinks) or [console]
         self.level = _LEVELS.get(level, 20)
+        self.context = dict(context or {})
 
     def emit(self, type: str, *, level: str = "info", **data: Any) -> None:
         if _LEVELS.get(level, 20) < self.level:
             return
-        event = {"ts": time.time(), "type": type, "level": level}
+        event = {"ts": time.time(), "type": type, "level": level, **self.context}
         run_id = _run_id.get()
         if run_id is not None:
             event["run_id"] = run_id

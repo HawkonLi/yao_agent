@@ -166,3 +166,24 @@ def test_parallel_last_session_stream():
     assert "group_end" in phases
     # start 一定在 end 之前
     assert phases.index("group_start") < phases.index("group_end")
+
+
+def test_group_events_have_stable_relationship_ids():
+    events = []
+    first, second = Echo("a"), Echo("b")
+    first.session_id = "session_a"
+    second.session_id = "session_b"
+    group = SessionGroup(first, second).trace(Trace(events.append, level="debug"))
+
+    go(group.run("one"))
+    go(group.run("two"))
+
+    group_events = [event for event in events if event["type"].startswith("group_")]
+    member_events = [event for event in events if event["type"].startswith("member_")]
+    assert {event["group_id"] for event in group_events + member_events} == {group.group_id}
+    assert {event["member_id"] for event in member_events} == {"session_a", "session_b"}
+    starts = [event for event in group_events if event["type"] == "group_start"]
+    assert starts[0]["members"] == starts[1]["members"] == [
+        {"type": "Echo", "member_id": "session_a"},
+        {"type": "Echo", "member_id": "session_b"},
+    ]

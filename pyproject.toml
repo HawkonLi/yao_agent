@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yaoagent"
-version = "0.2.1"
+version = "0.3.0"
 description = "声明式、响应式的 Python 智能体框架，灵感来自 Apple Foundation Models 的 dynamic sessions API。"
 readme = "README.md"
 requires-python = ">=3.11"

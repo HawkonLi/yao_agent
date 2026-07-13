@@ -62,6 +62,8 @@ class LLMConfig(BaseModel):
     api_key_env_name: str
     # 请求超时时间，单位为秒。
     timeout: float = Field(default=60.0, gt=0)
+    # OpenAI-compatible provider extensions (e.g. DeepSeek thinking mode).
+    extra_body: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("api_base_url")
     @classmethod
@@ -108,17 +110,21 @@ class LLMConfig(BaseModel):
         api_base_url: str = "https://api.deepseek.com",
         api_key_env_name: str = "DEEPSEEK_API_KEY",
         timeout: float = 60.0,
+        thinking: str | None = None,
     ) -> "LLMConfig":
         """
         构造一个对接 DeepSeek（OpenAI 兼容）的连接配置。
 
         常用模型：deepseek-v4-pro、deepseek-v4-flash（两者均支持 reasoning）。
         """
+        if thinking not in (None, "enabled", "disabled"):
+            raise ValueError("thinking 必须是 enabled、disabled 或 None")
         return cls(
             api_base_url=api_base_url,
             model_name=model_name,
             api_key_env_name=api_key_env_name,
             timeout=timeout,
+            extra_body={"thinking": {"type": thinking}} if thinking else {},
         )
 
     @classmethod
@@ -164,4 +170,5 @@ class LLMConfig(BaseModel):
             "model_name": self.model_name,
             "api_key": self.resolve_api_key(env),
             "timeout": self.timeout,
+            "extra_body": dict(self.extra_body),
         }

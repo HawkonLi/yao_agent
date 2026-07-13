@@ -19,6 +19,7 @@ group 由三个**正交维度**描述（彼此原子，编排约束另外两个�
 """
 
 import asyncio
+import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Protocol, runtime_checkable
@@ -128,10 +129,22 @@ async def _run_member(
 ) -> Any:
     """跑一个成员并（若启用）记录 member_start/member_end 事件；返回原始输出（保留 Response 的用量）。"""
     if emit:
-        emit("member_start", index=index, member=type(member).__name__, iteration=iteration)
+        emit(
+            "member_start",
+            index=index,
+            member=type(member).__name__,
+            member_id=getattr(member, "session_id", getattr(member, "group_id", None)),
+            iteration=iteration,
+        )
     output = await member.run(member_input)
     if emit:
-        emit("member_end", index=index, member=type(member).__name__, iteration=iteration)
+        emit(
+            "member_end",
+            index=index,
+            member=type(member).__name__,
+            member_id=getattr(member, "session_id", getattr(member, "group_id", None)),
+            iteration=iteration,
+        )
     return output
 
 
@@ -229,6 +242,7 @@ class SessionGroup:
         output_style: OutputPolicy | None = None,
     ) -> None:
         self.members = tuple(m for m in members if m is not None)
+        self.group_id = uuid.uuid4().hex[:12]
         self._style = style or Style.sequential
         self._input_style = input_style    # None → 用编排的默认
         self._output_style = output_style  # None → 用编排的默认
@@ -269,7 +283,7 @@ class SessionGroup:
 
     def _emit(self, type: str, *, level: str = "info", **data: Any) -> None:
         if self._trace is not None:
-            self._trace.emit(type, level=level, **data)
+            self._trace.emit(type, level=level, group_id=self.group_id, **data)
 
     def _inject(self) -> None:
         # 向成员下发本组的环境、默认 config 与日志（成员已有的优先，即“内层覆盖外层”）。
@@ -303,7 +317,15 @@ class SessionGroup:
             self._emit(
                 "group_start",
                 style=type(self._style).__name__,
-                members=[type(m).__name__ for m in self.members],
+                members=[
+                    {
+                        "type": type(member).__name__,
+                        "member_id": getattr(
+                            member, "session_id", getattr(member, "group_id", None)
+                        ),
+                    }
+                    for member in self.members
+                ],
             )
             result = await self._style.run(self.members, input, inputs, outputs, self._emit)
             self._emit("group_end", style=type(self._style).__name__)
@@ -348,7 +370,15 @@ class SessionGroup:
             self._emit(
                 "group_start",
                 style=type(self._style).__name__,
-                members=[type(m).__name__ for m in self.members],
+                members=[
+                    {
+                        "type": type(member).__name__,
+                        "member_id": getattr(
+                            member, "session_id", getattr(member, "group_id", None)
+                        ),
+                    }
+                    for member in self.members
+                ],
             )
 
             # 末位 = 输出成员
@@ -376,13 +406,18 @@ class SessionGroup:
                     )
 
             # 末位成员流式输出
-            self._emit("member_start", index=last_index, member=type(last).__name__)
+            last_id = getattr(last, "session_id", getattr(last, "group_id", None))
+            self._emit(
+                "member_start", index=last_index, member=type(last).__name__, member_id=last_id
+            )
             if hasattr(last, "stream_response"):
                 async for delta in last.stream_response(last_input):
                     yield delta
             else:
                 yield str(await last.run(last_input))
-            self._emit("member_end", index=last_index, member=type(last).__name__)
+            self._emit(
+                "member_end", index=last_index, member=type(last).__name__, member_id=last_id
+            )
 
             # 并行时等待从成员收尾（它们的进度事件继续发射）
             if slave_tasks:
